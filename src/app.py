@@ -58,7 +58,7 @@ class PlaylistChecker:
     def add_deleted_vids(self, videos, site):
         t = self.datetime2sql(datetime.utcnow())
         sql = 'INSERT INTO `videos` (`video_id`, `title`, `published_at`, `site`, `deleted`, `deleted_at`) VALUES ' \
-              f'(%s, %s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE deleted=TRUE, deleted_at=CURRENT_TIMESTAMP'
+              f'(%s, %s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE deleted_at=IF(`deleted`=FALSE, CURRENT_TIMESTAMP, `deleted_at`), deleted=TRUE'
 
         values = ((vid.video_id, "Deleted video", t, site, True, t) for vid in videos)
 
@@ -212,7 +212,8 @@ class PlaylistChecker:
 
                 vid_ids = self.get_vid_ids(playlist_items, site)
                 self.add_playlist_vids(playlist_data['id'], vid_ids.values())
-                self.add_deleted_vids(deleted, site)
+                if deleted:
+                    self.add_deleted_vids(deleted, site)
                 self.add_vid_tags(items, site)
 
                 after = playlist.get('after')

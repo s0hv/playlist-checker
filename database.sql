@@ -7,6 +7,7 @@ CREATE TABLE `videos` (
     `deleted` BOOL DEFAULT FALSE,
     `deleted_at` TIMESTAMP NULL DEFAULT NULL,
     `site` TINYINT UNSIGNED NOT NULL,
+    `alternative` TEXT COLLATE utf8mb4_unicode_ci DEFAULT NULL,
 
     PRIMARY KEY (`id`),
     KEY (`site`),

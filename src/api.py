@@ -67,6 +67,24 @@ class YTApi:
             max_results -= _max_results
             _max_results = min(50, max_results)
 
+    def playlist_info(self, playlist_id, part):
+        if isinstance(part, Part):
+            part = part.value
+
+        params = {'part': part, 'id': playlist_id}
+
+        try:
+            data = self.client.playlists().list(**params).execute()
+        except HttpError:
+            logger.exception('Failed to get playlist info because of an error')
+            return
+
+        if not data['items']:
+            logger.warning(f'Could not find playlist {playlist_id}')
+            return
+
+        return data['items'][0]
+
     def video_info(self, ids, part):
         if isinstance(part, Part):
             part = part.value

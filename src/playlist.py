@@ -8,15 +8,20 @@ class BasePlaylist(ABC):
         self._db = db
 
     @property
+    @abstractmethod
+    def url_format(self):
+        raise NotImplementedError
+
+    @property
     def db(self):
         return self._db
 
     @abstractmethod
-    def get_videos(self):
+    def get_videos(self, already_checked: set):
         raise NotImplementedError
 
     @abstractmethod
-    def get_deleted(self, new, old):
+    def get_deleted(self, new, old, checked_vids):
         raise NotImplementedError
 
 
@@ -30,6 +35,10 @@ class YTPlaylist(BasePlaylist):
     def api(self):
         return self._api
 
+    @property
+    def url_format(self):
+        return 'https://www.youtube.com/watch?v=%s'
+
     @staticmethod
     def vids2set(videos):
         video_set = {YTVideo(video['id'], **video) for video in videos}
@@ -37,23 +46,41 @@ class YTPlaylist(BasePlaylist):
 
     @staticmethod
     def playlistvids2set(videos):
-        video_set = {YTVideo(video['snippet']['resourceId']['videoId'], **video) for video in videos}
+        video_set = {YTVideo(video['contentDetails']['videoId'], **video) for video in videos}
         return video_set
 
-    def get_videos(self):
+    def get_playlist_info(self):
+        return self.api.playlist_info(self.playlist_id, Part.Snippet)
+
+    def get_videos(self, already_checked: dict):
         js = self.api.playlist_items(self.playlist_id, Part.combine(Part.ID, Part.ContentDetails))
         if js is None:
             return
 
-        items = [v['snippet']['resourceId']['videoId'] for v in js['items']]
+        checked_items = set()
+        items = []
+        all_items = js['items']
+        for vid in all_items:
+            vid_id = vid['contentDetails']['videoId']
+            if vid_id in already_checked:
+                checked_items.add(YTVideo(vid_id))
+            else:
+                items.append(vid_id)
+
         js = self.api.video_info(items, Part.Snippet)
         if not js:
             return
 
-        items = js['items']
+        items = self.vids2set(js['items'])
 
-        return self.get_deleted(self.vids2set(items), self.playlistvids2set(js['items']))
+        deleted = self.get_deleted(items, self.playlistvids2set(all_items), checked_items)
+        items = items - deleted
 
-    def get_deleted(self, new: set, old: set):
-        deleted = old - new
+        return items, deleted, checked_items
+
+    def get_deleted(self, new: set, old: set, checked_vids: set):
+        deleted = old - new - checked_vids
+        for vid in deleted:
+            vid.data = None
+
         return deleted

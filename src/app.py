@@ -199,13 +199,20 @@ class PlaylistChecker:
 
                     playlist_data['id'] = self.add_playlist(playlist_id, info['snippet']['title'], site)
 
+                # Get videos
                 old = self.get_playlist_video_ids(playlist_data['id'])
                 items, deleted, already_checked = playlist_checker.get_videos(self.already_checked[site])
+
+                # Update video cache
                 self.already_checked[site].update(items)
                 self.already_checked[site].update(deleted)
 
+                # Add new vids to db and update old items
                 self.add_and_update_vids(items, site)
 
+                # Put all vids in the playlist to a single list
+                # in order get the db ids so we can update
+                # the playlistVideos table correctly
                 playlist_items = [item.video_id for item in items]
                 playlist_items.extend([vid.video_id for vid in deleted])
                 playlist_items.extend([vid.video_id for vid in already_checked])
@@ -214,15 +221,20 @@ class PlaylistChecker:
                 self.add_playlist_vids(playlist_data['id'], vid_ids.values())
                 if deleted:
                     self.add_deleted_vids(deleted, site)
+
+                # Add new tags
                 self.add_vid_tags(items, site)
 
-                after = playlist.get('after')
+                # After processing of data by external scripts
+                after = playlist.get('after', [])
+                after.extend(self.config['after'])  # Default after command
+
                 if after:
                     old = [d['video_id'] for d in old]
                     new = items - {k for k, v in self.all_vids[site].items() if
                                    v in old}
-                    d = {'deleted': [vid.video_id for vid in deleted],
-                         'new': [vid.video_id for vid in new],
+                    d = {'deleted': [{'id': vid.video_id} for vid in deleted],
+                         'new': [{'id': vid.video_id} for vid in new],
                          'url_format': playlist_checker.url_format}
                     s = json.dumps(d, ensure_ascii=False, indent=2)
 

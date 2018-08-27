@@ -227,7 +227,7 @@ class PlaylistChecker:
 
                 # After processing of data by external scripts
                 after = playlist.get('after', [])
-                after.extend(self.config['after'])  # Default after command
+                after.extend(self.config.get('after', []))  # Default after command
 
                 if after:
                     old = [d['video_id'] for d in old]

@@ -18,7 +18,7 @@ CREATE TABLE `videos` (
 CREATE TABLE `channels` (
     `id` MEDIUMINT UNSIGNED NOT NULL AUTO_INCREMENT,
     `channel_id` VARCHAR(40) NOT NULL,
-    `name` VARCHAR(255) NOT NULL,
+    `name` VARCHAR(255) COLLATE utf8mb4_unicode_ci NOT NULL,
 
     PRIMARY KEY (`id`),
     UNIQUE KEY (`channel_id`)

@@ -2,6 +2,7 @@ from src.enums import Sites
 import pymysql.cursors
 from src.api import YTApi
 from src.playlist import YTPlaylist
+from src.video import YTVideo
 from datetime import datetime
 import subprocess
 import shlex
@@ -122,6 +123,49 @@ class PlaylistChecker:
 
         self.db.commit()
 
+    def add_channels(self, channels):
+        sql = 'INSERT IGNORE INTO `channels` (`channel_id`, `name`) VALUES (%s, %s) ' \
+              'ON DUPLICATE KEY UPDATE name=IF(VALUES(`name`) IS NULL, name, VALUES(`name`))'
+
+        with self.db.cursor() as cursor:
+            cursor.executemany(sql, channels.items())
+
+        self.db.commit()
+
+    def add_channel_videos(self, videos, site):
+        channels = {vid.channel_id: vid.channel_name for vid in videos if vid.channel_id is not None}
+        self.add_channels(channels)
+
+        format_channels = ','.join(['%s'] * len(channels.keys()))
+        sql = 'SELECT id, channel_id FROM `channels` WHERE channel_id IN (%s)' % format_channels
+
+        channel_ids = {}
+        with self.db.cursor() as cursor:
+            cursor.execute(sql, list(channels.keys()))
+
+            for row in cursor:
+                channel_ids[row['channel_id']] = row['id']
+
+        sql = 'INSERT IGNORE INTO `channelVideos` (`channel_id`, `video_id`) VALUES (%s, %s)'
+
+        data = []
+
+        for vid in videos:
+            channel_id = channel_ids.get(vid.channel_id)
+            if not channel_id:
+                continue
+
+            vid_id = self.all_vids[site].get(vid.video_id)
+            if not vid_id:
+                continue
+
+            data.append((channel_id, vid_id))
+
+        with self.db.cursor() as cursor:
+            cursor.executemany(sql, data)
+
+        self.db.commit()
+
     def add_playlist_vids(self, playlist_id, video_ids):
         sql = 'INSERT IGNORE INTO `playlistVideos` (`playlist_id`, `video_id`) VALUES ' \
               '(%s, %s)'
@@ -162,11 +206,77 @@ class PlaylistChecker:
             cursor.execute(sql)
             return cursor.fetchall()
 
-    def run_after(self, data, cmds):
+    @staticmethod
+    def run_after(data, cmds):
         for after in cmds:
-            p = subprocess.Popen(shlex.split(after), stdin=subprocess.PIPE)
+            try:
+                p = subprocess.Popen(shlex.split(after), stdin=subprocess.PIPE)
+            except FileNotFoundError:
+                logger.exception('File "%s" not found' % after)
+                continue
+
             p.stdin.write(data.encode('utf-8'))
-            p.communicate()
+            try:
+                p.communicate()
+            except:
+                logger.exception('Failed to run script %s' % after)
+
+    def get_new_deleted(self, deleted, site):
+        if not deleted:
+            return []
+
+        deleted_format = ','.join(['%s']*len(deleted))
+        sql = f'SELECT title, video_id FROM `videos` WHERE deleted IS FALSE AND site={site}' \
+               ' AND video_id IN (%s)' % deleted_format
+
+        new_deleted = set()
+        with self.db.cursor() as cursor:
+            cursor.execute(sql, [vid.video_id for vid in deleted])
+
+            for row in cursor:
+                video_id = row['video_id']
+                video = None
+                for vid in deleted:
+                    if vid.video_id == video_id:
+                        video = vid
+                        break
+
+                if not video:
+                    continue
+
+                video.title = row['title']
+                new_deleted.add(video)
+
+        return new_deleted
+
+    def get_deleted_info(self, deleted, site):
+        if not deleted:
+            return ()
+
+        deleted_format = ','.join(['%s']*len(deleted))
+        sql = 'SELECT v.video_id, v.title, c.name, c.channel_id FROM `videos` v INNER JOIN `channelVideos` cv ' \
+              'ON cv.video_id=v.id INNER JOIN `channels` c ON cv.channel_id = c.id ' \
+             f'WHERE site={site} AND v.video_id IN (%s)' % deleted_format
+
+        with self.db.cursor() as cursor:
+            cursor.execute(sql, [vid.video_id for vid in deleted])
+
+            for row in cursor:
+                video_id = row['video_id']
+                video = None
+                for vid in deleted:
+                    if vid.video_id == video_id:
+                        video = vid
+                        break
+
+                if not video:
+                    continue
+
+                video.title = row['title']
+                video.channel_name = row['name']
+                video.channel_id = row['channel_id']
+
+        return deleted
 
     def check_all(self):
         logger.info('Starting check')
@@ -189,6 +299,7 @@ class PlaylistChecker:
             site = playlist['site']
             logger.info(f'Checking playlist {playlist_id} on site {site}')
 
+            # Create playlist by site
             if site == Sites.Youtube:
                 playlist_checker = YTPlaylist(self.db, self.yt_api, playlist_id)
                 if not playlist_data:
@@ -198,10 +309,14 @@ class PlaylistChecker:
                         continue
 
                     playlist_data['id'] = self.add_playlist(playlist_id, info['snippet']['title'], site)
+                    playlist_data['name'] = info['snippet']['title']
 
                 # Get videos
                 old = self.get_playlist_video_ids(playlist_data['id'])
                 items, deleted, already_checked = playlist_checker.get_videos(self.already_checked[site])
+
+                # Get new deleted videos
+                new_deleted = self.get_new_deleted(deleted, site)
 
                 # Update video cache
                 self.already_checked[site].update(items)
@@ -225,6 +340,9 @@ class PlaylistChecker:
                 # Add new tags
                 self.add_vid_tags(items, site)
 
+                # Add channels and channel videos
+                self.add_channel_videos(items, site)
+
                 # After processing of data by external scripts
                 after = playlist.get('after', [])
                 after.extend(self.config.get('after', []))  # Default after command
@@ -233,9 +351,42 @@ class PlaylistChecker:
                     old = [d['video_id'] for d in old]
                     new = items - {k for k, v in self.all_vids[site].items() if
                                    v in old}
-                    d = {'deleted': [{'id': vid.video_id} for vid in deleted],
-                         'new': [{'id': vid.video_id} for vid in new],
-                         'url_format': playlist_checker.url_format}
+
+                    # Get info of rest of the deleted vids
+                    deleted = self.get_deleted_info(deleted, site)
+
+                    # Base json format
+                    d = {'url_format': playlist_checker.url_format,
+                         'channel_format': playlist_checker.channel_url_format,
+                         'playlist_format': playlist_checker.playlist_url_format,
+                         'playlist_id': playlist_id,
+                         'playlist_name': playlist_data.get('name', playlist.get('name', 'Unnamed'))}
+
+                    # We don't want to create the lists for nothing so we call
+                    # the generators on demand
+                    add_deleted = lambda: [vid.to_dict() for vid in deleted]
+                    add_new_deleted = lambda: [vid.to_dict() for vid in new_deleted]
+                    add_new = lambda: [vid.to_dict() for vid in new]
+
+                    fields = {'deleted': add_new_deleted, 'new_deleted': add_new_deleted,
+                              'new': add_new}
+
+                    # Get all the fields the scripts require
+                    required_fields = set()
+                    required_fields.update(playlist.get('required_fields', []))
+                    required_fields.update(self.config.get('required_fields', []))
+                    if required_fields:
+                        for field in required_fields:
+                            f = fields.get(field)
+                            if not f:
+                                continue
+
+                            d[field] = f()
+                    else:
+                        d.update({'deleted': add_deleted,
+                                  'new_deleted': add_new_deleted,
+                                  'new': add_new})
+
                     s = json.dumps(d, ensure_ascii=False, indent=2)
 
                     thread = threading.Thread(target=self.run_after, args=(s, after), daemon=True)
@@ -244,7 +395,7 @@ class PlaylistChecker:
 
             logger.info(f'Done checking {playlist_id}')
 
-        after = self.config.get('after')
+        after = self.config.get('after_all')
         if after:
             # TODO do when it when you need it
             pass

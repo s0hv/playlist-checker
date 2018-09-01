@@ -36,12 +36,20 @@ class BaseVideo(ABC):
 
     @property
     @abstractmethod
+    def channel_url(self):
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
     def tags(self):
         raise NotImplementedError
 
     @property
     @abstractmethod
     def published_at(self):
+        raise NotImplementedError
+
+    def to_dict(self):
         raise NotImplementedError
 
     def __eq__(self, other):
@@ -58,11 +66,18 @@ class YTVideo(BaseVideo):
     def __init__(self, video_id, **data):
         super().__init__(video_id)
         self.data = data
+        if 'snippet' not in data:
+            data['snippet'] = {}
+
         self._hashtags = hashtag_regex.findall(self.description)[:10]
 
     @property
     def title(self):
         return self.data['snippet'].get('title')
+
+    @title.setter
+    def title(self, title):
+        self.data['snippet']['title'] = title
 
     @property
     def link(self):
@@ -72,9 +87,22 @@ class YTVideo(BaseVideo):
     def channel_name(self):
         return self.data['snippet'].get('channelTitle')
 
+    @channel_name.setter
+    def channel_name(self, name):
+        self.data['snippet']['channelTitle'] = name
+
     @property
     def channel_id(self):
         return self.data['snippet'].get('channelId')
+
+    @channel_id.setter
+    def channel_id(self, chnl_id):
+        self.data['snippet']['channelId'] = chnl_id
+
+    @property
+    def channel_url(self):
+        if self.channel_id:
+            return 'https://www.youtube.com/channel/%s' % self.channel_id
 
     @property
     def description(self):
@@ -93,3 +121,9 @@ class YTVideo(BaseVideo):
             t = datetime.strptime(t, '%Y-%m-%dT%H:%M:%S.%fZ')
 
         return t
+
+    def to_dict(self):
+        return {'id': self.video_id,
+                'title': self.title or 'Deleted video',
+                'channel_name': self.channel_name,
+                'channel_id': self.channel_id}

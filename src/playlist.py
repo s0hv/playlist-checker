@@ -13,6 +13,16 @@ class BasePlaylist(ABC):
         raise NotImplementedError
 
     @property
+    @abstractmethod
+    def channel_url_format(self):
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
+    def playlist_url_format(self):
+        raise NotImplementedError
+
+    @property
     def db(self):
         return self._db
 
@@ -38,6 +48,14 @@ class YTPlaylist(BasePlaylist):
     @property
     def url_format(self):
         return 'https://www.youtube.com/watch?v=%s'
+
+    @property
+    def channel_url_format(self):
+        return 'https://www.youtube.com/channel/%s'
+
+    @property
+    def playlist_url_format(self):
+        return 'https://www.youtube.com/playlist?list=%s'
 
     @staticmethod
     def vids2set(videos):
@@ -81,6 +99,6 @@ class YTPlaylist(BasePlaylist):
     def get_deleted(self, new: set, old: set, checked_vids: set):
         deleted = old - new - checked_vids
         for vid in deleted:
-            vid.data = None
+            vid.data = {'snippet': {}}
 
         return deleted

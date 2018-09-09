@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 import re
 from datetime import datetime
+from src.utils import get_yt_thumb
+
 
 hashtag_regex = re.compile('#\w+')
 
@@ -94,6 +96,14 @@ class YTVideo(BaseVideo):
     @property
     def channel_id(self):
         return self.data['snippet'].get('channelId')
+
+    @property
+    def thumbnail(self):
+        thumbs = self.data['snippet'].get('thumbnails')
+        if not thumbs:
+            return
+
+        return get_yt_thumb(thumbs)
 
     @channel_id.setter
     def channel_id(self, chnl_id):

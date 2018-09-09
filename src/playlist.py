@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from src.api import YTApi, Part
 from src.video import YTVideo
+from src.channel import YTChannel
 
 
 class BasePlaylist(ABC):
@@ -32,6 +33,10 @@ class BasePlaylist(ABC):
 
     @abstractmethod
     def get_deleted(self, new, old, checked_vids):
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_channels(self, channel_ids):
         raise NotImplementedError
 
 
@@ -102,3 +107,15 @@ class YTPlaylist(BasePlaylist):
             vid.data = {'snippet': {}}
 
         return deleted
+
+    def get_channels(self, channel_ids):
+        js = self.api.channel_info(list(channel_ids), Part.Snippet)
+        if not js:
+            return
+
+        items = []
+        for item in js['items']:
+            channel_id = item['id']
+            items.append(YTChannel(channel_id, item))
+
+        return items

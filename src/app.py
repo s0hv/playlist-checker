@@ -3,6 +3,7 @@ import pymysql.cursors
 from src.api import YTApi
 from src.playlist import YTPlaylist
 from src.video import YTVideo
+from src.channel import YTChannel
 from datetime import datetime
 import subprocess
 import shlex
@@ -18,6 +19,7 @@ class PlaylistChecker:
         self.config = config
         self.already_checked = {site: set() for site in list(Sites.__members__.values())}
         self.all_vids = {site: {} for site in list(Sites.__members__.values())}
+        self.channel_cache = {site: set() for site in list(Sites.__members__.values())}
 
         self._db = pymysql.connect(host=self.config['db_host'],
                                    port=self.config['db_port'],
@@ -44,11 +46,12 @@ class PlaylistChecker:
         return self._yt_api
 
     def add_and_update_vids(self, videos, site):
-        sql = 'INSERT INTO `videos` (`video_id`, `title`, `description`, `published_at`, `site`) VALUES ' \
-              f'(%s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE title=IF(`title`!=VALUES(`title`), VALUES(`title`), `title`), ' \
-              'description=IF(`description`!=VALUES(`description`), VALUES(`description`), `description`), deleted=FALSE'
+        sql = 'INSERT INTO `videos` (`video_id`, `title`, `description`, `published_at`, `site`, `thumbnail`) VALUES ' \
+              f'(%s, %s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE title=IF(`title`!=VALUES(`title`), VALUES(`title`), `title`), ' \
+              'description=IF(`description`!=VALUES(`description`), VALUES(`description`), `description`), deleted=FALSE,' \
+              'thumbnail=IF(VALUES(`thumbnail`) IS NULL, thumbnail, VALUES(`thumbnail`))'
 
-        values = ((vid.video_id, vid.title, vid.description, self.datetime2sql(vid.published_at), site)
+        values = ((vid.video_id, vid.title, vid.description, self.datetime2sql(vid.published_at), site, vid.thumbnail)
                   for vid in videos)
 
         with self.db.cursor() as cursor:
@@ -124,24 +127,24 @@ class PlaylistChecker:
         self.db.commit()
 
     def add_channels(self, channels):
-        sql = 'INSERT IGNORE INTO `channels` (`channel_id`, `name`) VALUES (%s, %s) ' \
-              'ON DUPLICATE KEY UPDATE name=IF(VALUES(`name`) IS NULL, name, VALUES(`name`))'
+        sql = 'INSERT IGNORE INTO `channels` (`channel_id`, `name`, `thumbnail`) VALUES (%s, %s, %s) ' \
+              'ON DUPLICATE KEY UPDATE name=IF(VALUES(`name`) IS NULL, name, VALUES(`name`)), ' \
+              'thumbnail=IF(VALUES(`thumbnail`) IS NULL, thumbnail, VALUES(`thumbnail`))'
 
         with self.db.cursor() as cursor:
-            cursor.executemany(sql, channels.items())
+            cursor.executemany(sql, [(c.channel_id, c.name, c.thumbnail) for c in channels])
 
         self.db.commit()
 
-    def add_channel_videos(self, videos, site):
-        channels = {vid.channel_id: vid.channel_name for vid in videos if vid.channel_id is not None}
-        self.add_channels(channels)
+    def add_channel_videos(self, videos, channels, site):
+        self.add_channels([c for c in channels if not isinstance(c, str)])
 
-        format_channels = ','.join(['%s'] * len(channels.keys()))
+        format_channels = ','.join(['%s'] * len(channels))
         sql = 'SELECT id, channel_id FROM `channels` WHERE channel_id IN (%s)' % format_channels
 
         channel_ids = {}
         with self.db.cursor() as cursor:
-            cursor.execute(sql, list(channels.keys()))
+            cursor.execute(sql, [c if isinstance(c, str) else c.channel_id for c in channels])
 
             for row in cursor:
                 channel_ids[row['channel_id']] = row['id']
@@ -340,8 +343,16 @@ class PlaylistChecker:
                 # Add new tags
                 self.add_vid_tags(items, site)
 
+                # Cache channels
+                cached_channels = {v.channel_id for v in items}
+                channels = cached_channels - self.channel_cache[site]
+                cached_channels = cached_channels - channels
+                channels = playlist_checker.get_channels(channels)
+                self.channel_cache[site].update(channels)
+                channels.extend(cached_channels)
+
                 # Add channels and channel videos
-                self.add_channel_videos(items, site)
+                self.add_channel_videos(items, channels, site)
 
                 # After processing of data by external scripts
                 after = playlist.get('after', [])

@@ -110,3 +110,30 @@ class YTApi:
         js['items'] = all_items
 
         return js
+
+    def channel_info(self, channel_ids, part):
+        if isinstance(part, Part):
+            part = part.value
+
+        params = {'part': part,
+                  'maxResults': 50}
+
+        page_token = False
+        all_items = []
+        js = {}
+        for idx in range(0, len(channel_ids), 50):
+            if page_token:
+                params['pageToken'] = page_token
+            params['id'] = ','.join(channel_ids[idx:idx+50])
+            try:
+                js = self.client.channels().list(**params).execute()
+            except HttpError:
+                logger.exception('Failed to get video info')
+                return
+
+            page_token = js.get('nextPageToken')
+            all_items.extend(js.get('items', []))
+
+        js['items'] = all_items
+
+        return js

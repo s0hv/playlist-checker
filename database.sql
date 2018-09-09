@@ -8,10 +8,11 @@ CREATE TABLE `videos` (
     `deleted_at` TIMESTAMP NULL DEFAULT NULL,
     `site` TINYINT UNSIGNED NOT NULL,
     `alternative` TEXT COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+    `thumbnail` VARCHAR(256) COLLATE latin1_swedish_ci DEFAULT NULL,
 
     PRIMARY KEY (`id`),
-    KEY (`site`),
-    UNIQUE KEY (`video_id`)
+    FULLTEXT (`title`),
+    UNIQUE KEY (`video_id`, `site`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
@@ -19,6 +20,7 @@ CREATE TABLE `channels` (
     `id` MEDIUMINT UNSIGNED NOT NULL AUTO_INCREMENT,
     `channel_id` VARCHAR(40) NOT NULL,
     `name` VARCHAR(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+    `thumbnail` VARCHAR(255) DEFAULT NULL,
 
     PRIMARY KEY (`id`),
     UNIQUE KEY (`channel_id`)
@@ -37,11 +39,11 @@ CREATE TABLE `channelVideos` (
 
 CREATE TABLE `tags` (
     `id` MEDIUMINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    `tag` VARCHAR(190) COLLATE utf8_bin,
+    `tag` VARCHAR(190) COLLATE utf8mb4_bin NOT NULL,
 
     PRIMARY KEY (`id`),
     UNIQUE KEY (`tag`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLlATE=utf8mb4_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 
 CREATE TRIGGER lcase_insert BEFORE INSERT ON `tags` FOR EACH ROW SET NEW.tag = LOWER(NEW.tag);

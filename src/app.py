@@ -49,7 +49,8 @@ class PlaylistChecker:
         sql = 'INSERT INTO `videos` (`video_id`, `title`, `description`, `published_at`, `site`, `thumbnail`) VALUES ' \
               f'(%s, %s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE title=IF(`title`!=VALUES(`title`), VALUES(`title`), `title`), ' \
               'description=IF(`description`!=VALUES(`description`), VALUES(`description`), `description`), deleted=FALSE,' \
-              'thumbnail=IF(VALUES(`thumbnail`) IS NULL, thumbnail, VALUES(`thumbnail`))'
+              'thumbnail=IF(VALUES(`thumbnail`) IS NULL, thumbnail, VALUES(`thumbnail`)), ' \
+              'published_at=VALUES(`published_at`)'
 
         values = ((vid.video_id, vid.title, vid.description, self.datetime2sql(vid.published_at), site, vid.thumbnail)
                   for vid in videos)

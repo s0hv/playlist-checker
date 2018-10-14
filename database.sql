@@ -54,8 +54,8 @@ CREATE TABLE `videoTags` (
     `video_id` MEDIUMINT UNSIGNED NOT NULL,
     `tag_id` MEDIUMINT UNSIGNED NOT NULL,
 
-    FOREIGN KEY (`video_id`) REFERENCES `videos` (`id`) ON DELETE CASCADE,
-    FOREIGN KEY (`tag_id`) REFERENCES `tags` (`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`video_id`) REFERENCES `videos` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (`tag_id`) REFERENCES `tags` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
     PRIMARY KEY (`video_id`, `tag_id`)
 ) ENGINE=InnoDB;
 
@@ -76,7 +76,7 @@ CREATE TABLE `playlistVideos` (
     `playlist_id` MEDIUMINT UNSIGNED NOT NULL,
     `video_id` MEDIUMINT UNSIGNED NOT NULL,
 
-    FOREIGN KEY (`playlist_id`) REFERENCES `playlists` (`id`) ON DELETE CASCADE,
-    FOREIGN KEY (`video_id`) REFERENCES `videos` (`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`playlist_id`) REFERENCES `playlists` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
+    FOREIGN KEY (`video_id`) REFERENCES `videos` (`id`) ON DELETE CASCADE ON UPDATE CASCADE,
     PRIMARY KEY (`playlist_id`, `video_id`)
 ) ENGINE=InnoDB;

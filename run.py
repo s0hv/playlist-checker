@@ -4,6 +4,9 @@ import os
 import filelock
 from filelock import Timeout
 from src.app import PlaylistChecker
+import sys
+import argparse
+
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 logger = logging.getLogger('debug')
@@ -11,6 +14,9 @@ logger.setLevel(logging.DEBUG)
 handler = logging.FileHandler(filename=os.path.join(dir_path, 'debug.log'), encoding='utf-8', mode='a')
 handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
 logger.addHandler(handler)
+
+parser = argparse.ArgumentParser()
+parser.add_argument('-s', '--specific', nargs='+')
 
 if __name__ == '__main__':
     lock = os.path.join(dir_path, '.lock')
@@ -36,5 +42,7 @@ if __name__ == '__main__':
         config = json.load(f)
 
     checker = PlaylistChecker(config)
+    args = sys.argv
+    args = parser.parse_args(args[1:])
 
-    checker.check_all()
+    checker.check_all(args.specific)

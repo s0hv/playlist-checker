@@ -282,7 +282,7 @@ class PlaylistChecker:
 
         return deleted
 
-    def check_all(self):
+    def check_all(self, whitelist=None):
         logger.info('Starting check')
         with self.db.cursor() as cursor:
             sql = 'SELECT * FROM `playlists`'
@@ -299,6 +299,11 @@ class PlaylistChecker:
         logger.info(f'Checking a total of {len(playlists)} playlists')
         for playlist in playlists:
             playlist_id = playlist['playlist_id']
+
+            # Ignore non whitelisted playlists if whitelist in use
+            if whitelist and playlist_id not in whitelist:
+                continue
+
             playlist_data = _playlists.get(playlist_id, {})
             site = playlist['site']
             logger.info(f'Checking playlist {playlist_id} on site {site}')
@@ -380,7 +385,7 @@ class PlaylistChecker:
                     add_new_deleted = lambda: [vid.to_dict() for vid in new_deleted]
                     add_new = lambda: [vid.to_dict() for vid in new]
 
-                    fields = {'deleted': add_new_deleted, 'new_deleted': add_new_deleted,
+                    fields = {'deleted': add_deleted, 'new_deleted': add_new_deleted,
                               'new': add_new}
 
                     # Get all the fields the scripts require
@@ -395,9 +400,9 @@ class PlaylistChecker:
 
                             d[field] = f()
                     else:
-                        d.update({'deleted': add_deleted,
-                                  'new_deleted': add_new_deleted,
-                                  'new': add_new})
+                        d.update({'deleted': add_deleted(),
+                                  'new_deleted': add_new_deleted(),
+                                  'new': add_new()})
 
                     s = json.dumps(d, ensure_ascii=False, indent=2)
 

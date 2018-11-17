@@ -46,6 +46,21 @@ class PlaylistChecker:
         return self._yt_api
 
     def add_and_update_vids(self, videos, site):
+        """
+        Adds new videos to database and updates the following properties from
+        duplicate entries:
+            title, description, thumbnail url, publish date
+            also sets the deleted flag to False
+
+        Do not give deleted videos to this function. It will set the deleted
+        flag on them
+
+        Args:
+            videos (collections.Iterable of src.video.BaseVideo):
+                Iterable of :class:`BaseVideo` that will be added or updated
+            site (int):
+                id of the site being used
+        """
         sql = 'INSERT INTO `videos` (`video_id`, `title`, `description`, `published_at`, `site`, `thumbnail`) VALUES ' \
               f'(%s, %s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE title=IF(`title`!=VALUES(`title`), VALUES(`title`), `title`), ' \
               'description=IF(`description`!=VALUES(`description`), VALUES(`description`), `description`), deleted=FALSE,' \
@@ -61,6 +76,16 @@ class PlaylistChecker:
         self.db.commit()
 
     def add_deleted_vids(self, videos, site):
+        """
+        Sets the deleted flag on the videos provided and also sets the
+        deletion time column if the deleted flag hasn't been set before
+
+        Args:
+            videos (collections.Iterable of src.video.BaseVideo):
+                Iterable of :class:`BaseVideo` that are deleted
+            site (int):
+                id of the site being used
+        """
         t = self.datetime2sql(datetime.utcnow())
         sql = 'INSERT INTO `videos` (`video_id`, `title`, `published_at`, `site`, `deleted`, `deleted_at`) VALUES ' \
               f'(%s, %s, %s, %s, %s, %s) ON DUPLICATE KEY UPDATE deleted_at=IF(`deleted`=FALSE, CURRENT_TIMESTAMP, `deleted_at`), deleted=TRUE'
@@ -73,11 +98,25 @@ class PlaylistChecker:
         self.db.commit()
 
     def add_vid_tags(self, videos, site, default_tags=None):
+        """
+        Adds missing tags to the database based on the provided videos
+
+        Args:
+            videos (list of src.video.BaseVideo):
+                List of videos from which the tags will be added
+            site (int):
+                id of the site being used
+            default_tags (list of str):
+                An list of tag names to be applied to every video in the videos
+                param
+        """
         sql = 'INSERT IGNORE INTO `tags` (`tag`) VALUES (%s)'
         default_tags = [] if not default_tags else default_tags
         values = set(default_tags)
         cached_tags = set(self.all_tags.keys())
 
+        # Copy the list of videos since we don't wanna edit the original list
+        videos = videos.copy()
         for vid in videos.copy():
             if not vid.data:
                 videos.remove(vid)
@@ -95,6 +134,7 @@ class PlaylistChecker:
 
         self.db.commit()
 
+        # Get non cached tags and add them to db
         tobecached = values - cached_tags
 
         format_tags = ','.join(['%s'] * len(tobecached))
@@ -107,15 +147,25 @@ class PlaylistChecker:
 
         values = []
         for vid in videos:
+            video_id = self.all_vids[site].get(vid.video_id)
+            if not video_id:
+                print('Video id not found with %s' % vid)
+                continue
+
+            # Add video specific tags
             for tag in vid.tags:
                 tag_id = self.all_tags.get(tag.lower())
                 if not tag_id:
                     print('Tag %s not found' % tag)
                     continue
 
-                video_id = self.all_vids[site].get(vid.video_id)
-                if not video_id:
-                    print('Video id not found with %s' % vid)
+                values.append((tag_id, video_id))
+
+            # Add default tags
+            for default_tag in default_tags:
+                tag_id = self.all_tags.get(default_tag.lower())
+                if not tag_id:
+                    logger.warning('Tag %s not found' % default_tag)
                     continue
 
                 values.append((tag_id, video_id))
@@ -128,6 +178,15 @@ class PlaylistChecker:
         self.db.commit()
 
     def add_channels(self, channels):
+        """
+        Adds channels to db and updates old entries
+        Columns updated are as follows:
+            name and thumbnail aka profile pic
+
+        Args:
+            channels (collections.Iterable of src.channel.BaseChannel):
+
+        """
         sql = 'INSERT IGNORE INTO `channels` (`channel_id`, `name`, `thumbnail`) VALUES (%s, %s, %s) ' \
               'ON DUPLICATE KEY UPDATE name=IF(VALUES(`name`) IS NULL, name, VALUES(`name`)), ' \
               'thumbnail=IF(VALUES(`thumbnail`) IS NULL, thumbnail, VALUES(`thumbnail`))'
@@ -138,13 +197,27 @@ class PlaylistChecker:
         self.db.commit()
 
     def add_channel_videos(self, videos, channels, site):
-        self.add_channels([c for c in channels if not isinstance(c, str)])
+        """
+        Link video ids to channel ids in the channelVideos table
+        This will handle adding missing channels for you. The videos need
+        to have the channel property set to for this to work
 
+        Args:
+            videos (collections.Iterable of src.video.BaseVideo):
+                List of :class:`BaseVideo` instances
+            channels(list of str or src.channel.BaseChannel):
+                Mixed list of :class:`BaseChannel`instances and
+                channel_ids as `str`
+            site (int):
+                id of the site being used
+        """
+        self.add_channels([c for c in channels if not isinstance(c, str)])
         format_channels = ','.join(['%s'] * len(channels))
         sql = 'SELECT id, channel_id FROM `channels` WHERE channel_id IN (%s)' % format_channels
 
         channel_ids = {}
         with self.db.cursor() as cursor:
+            #
             cursor.execute(sql, [c if isinstance(c, str) else c.channel_id for c in channels])
 
             for row in cursor:
@@ -171,6 +244,16 @@ class PlaylistChecker:
         self.db.commit()
 
     def add_playlist_vids(self, playlist_id, video_ids):
+        """
+        Add video playlist connection to the playlistVideos table
+
+        Args:
+            playlist_id (int):
+                The database id for the playlist
+            video_ids (collections.Iterable of int):
+                An iterable of database ids for videos that are added the
+                specified playlist
+        """
         sql = 'INSERT IGNORE INTO `playlistVideos` (`playlist_id`, `video_id`) VALUES ' \
               '(%s, %s)'
 
@@ -182,6 +265,18 @@ class PlaylistChecker:
         self.db.commit()
 
     def get_vid_ids(self, vid_ids, site):
+        """
+        Gets the database ids to the corresponding video ids
+
+        Args:
+            vid_ids (list of str):
+                list of video ids of the specified site
+            site (site):
+                Id of the site being used
+
+        Returns:
+            dict: a dictionary of type {str: int} aka {video_id: database_id}
+        """
         format_ids = ','.join(['%s'] * len(vid_ids))
         sql = f'SELECT id, video_id FROM `videos` WHERE site={site} AND video_id IN (%s)' % format_ids
 
@@ -193,6 +288,21 @@ class PlaylistChecker:
         return vid_ids
 
     def add_playlist(self, playlist_id, name, site):
+        """
+        Adds a playlist to the database if it doesn't exist
+
+        Args:
+            playlist_id (str):
+                id of the playlist
+            name (str):
+                name of the playlist
+            site (int):
+                Id of the site being used
+
+        Returns:
+            int: The database id of the newly made playlist
+
+        """
         sql = 'INSERT INTO `playlists` (`playlist_id`, `name`, `site`) VALUES (%s, %s, %s)'
 
         with self.db.cursor() as cursor:
@@ -204,6 +314,16 @@ class PlaylistChecker:
         return playlist_id
 
     def get_playlist_video_ids(self, playlist_id: int):
+        """
+        Gets all video ids that are associated with this playlist
+        Args:
+            playlist_id (int):
+
+        Returns:
+            list:
+                A list of dicts with the "video_id" as key and the
+                actual id as value (int)
+        """
         sql = 'SELECT video_id FROM `playlistVideos` WHERE playlist_id=%s' % playlist_id
 
         with self.db.cursor() as cursor:
@@ -212,6 +332,10 @@ class PlaylistChecker:
 
     @staticmethod
     def run_after(data, cmds):
+        """
+        Runs all specified commands and inputs data encoded in utf-8 to stdin
+        """
+        data = data.encode('utf-8')
         for after in cmds:
             try:
                 p = subprocess.Popen(shlex.split(after), stdin=subprocess.PIPE)
@@ -219,15 +343,28 @@ class PlaylistChecker:
                 logger.exception('File "%s" not found' % after)
                 continue
 
-            p.stdin.write(data.encode('utf-8'))
+            p.stdin.write(data)
             try:
                 p.communicate()
             except:
                 logger.exception('Failed to run script %s' % after)
 
     def get_new_deleted(self, deleted, site):
+        """
+        Gets the newly deleted videos from the specified site with
+        updated titles
+
+        Args:
+            deleted (list of src.video.BaseVideo):
+                List of all deleted vids from a site
+            site (int):
+                Id if the site currently in use
+
+        Returns:
+            set: A set of BaseVideo objects with updated titles
+        """
         if not deleted:
-            return []
+            return set()
 
         deleted_format = ','.join(['%s']*len(deleted))
         sql = f'SELECT title, video_id FROM `videos` WHERE deleted IS FALSE AND site={site}' \
@@ -254,6 +391,20 @@ class PlaylistChecker:
         return new_deleted
 
     def get_deleted_info(self, deleted, site):
+        """
+        Updates BaseVideo objects with cached info from database
+        Namely updates title, channel name and channel id
+
+        Args:
+            deleted (list of src.video.BaseVideo):
+                 List of the videos to be updated
+            site (int):
+                Id of the site used
+
+        Returns:
+            list: Exactly the same list as it was given
+
+        """
         if not deleted:
             return ()
 
@@ -283,6 +434,15 @@ class PlaylistChecker:
         return deleted
 
     def check_all(self, whitelist=None):
+        """
+        Main function of this class that runs the whole thing and
+        does all the stuff to make everything work as intended
+
+        Args:
+            whitelist (list of str):
+                Optional list of playlist ids if you want to only check
+                specific playlists
+        """
         logger.info('Starting check')
         with self.db.cursor() as cursor:
             sql = 'SELECT * FROM `playlists`'

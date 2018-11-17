@@ -2,19 +2,28 @@ from abc import ABC, abstractmethod
 import re
 from datetime import datetime
 from src.utils import get_yt_thumb
+from src.enums import Sites
 
 
 hashtag_regex = re.compile('#\w+')
 
 
 class BaseVideo(ABC):
-    def __init__(self, video_id):
+    SITE = None
+
+    def __init__(self, video_id, data):
         self.video_id = video_id
+        self.data = data
 
     @property
     @abstractmethod
     def title(self):
         raise NotImplementedError
+
+    @title.setter
+    def title(self, value):
+        raise NotImplementedError
+
 
     @property
     @abstractmethod
@@ -31,9 +40,17 @@ class BaseVideo(ABC):
     def channel_name(self):
         raise NotImplementedError
 
+    @channel_name.setter
+    def channel_name(self, value):
+        raise NotImplementedError
+
     @property
     @abstractmethod
     def channel_id(self):
+        raise NotImplementedError
+
+    @channel_id.setter
+    def channel_id(self, value):
         raise NotImplementedError
 
     @property
@@ -48,6 +65,11 @@ class BaseVideo(ABC):
 
     @property
     @abstractmethod
+    def thumbnail(self):
+        raise NotImplementedError
+
+    @property
+    @abstractmethod
     def published_at(self):
         raise NotImplementedError
 
@@ -56,7 +78,7 @@ class BaseVideo(ABC):
 
     def __eq__(self, other):
         if isinstance(other, BaseVideo):
-            return self.video_id == other.video_id
+            return other.SITE == self.SITE and self.video_id == other.video_id
         else:
             return self.video_id == other
 
@@ -65,9 +87,10 @@ class BaseVideo(ABC):
 
 
 class YTVideo(BaseVideo):
+    SITE = Sites.Youtube
+
     def __init__(self, video_id, **data):
-        super().__init__(video_id)
-        self.data = data
+        super().__init__(video_id, data)
         if 'snippet' not in data:
             data['snippet'] = {}
 

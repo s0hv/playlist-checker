@@ -37,6 +37,10 @@ WHERE
 	playlistVideos.video_id = newIDs.parentID;
 
 
+SET @s=CONCAT('ALTER TABLE videos AUTO_INCREMENT = ', (SELECT max(ID) from newIDs), ';');
+PREPARE stmt1 FROM @s;
+EXECUTE stmt1;
+DEALLOCATE PREPARE stmt1;
 TRUNCATE TABLE newIDs;
 
 
@@ -52,10 +56,14 @@ WHERE
 	tags.id = newIDs.parentID AND
 	videoTags.tag_id = newIDs.parentID;
 
+SET @s=CONCAT('ALTER TABLE tags AUTO_INCREMENT = ', (SELECT max(ID) from newIDs), ';');
+PREPARE stmt1 FROM @s;
+EXECUTE stmt1;
+DEALLOCATE PREPARE stmt1;
 TRUNCATE TABLE newIDs;
 
 
--- tags
+-- channels
 INSERT INTO newIDs (parentID) SELECT id FROM channels ORDER BY id ASC;
 
 UPDATE
@@ -67,5 +75,9 @@ WHERE
 	channels.id = newIDs.parentID AND
 	channelVideos.channel_id = newIDs.parentID;
 
+SET @s=CONCAT('ALTER TABLE channels AUTO_INCREMENT = ', (SELECT max(ID) from newIDs), ';');
+PREPARE stmt1 FROM @s;
+EXECUTE stmt1;
+DEALLOCATE PREPARE stmt1;
 DROP TABLE newIDs;
 SET foreign_key_checks = 1;

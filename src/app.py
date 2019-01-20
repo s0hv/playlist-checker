@@ -138,13 +138,14 @@ class PlaylistChecker:
         # Get non cached tags and add them to db
         tobecached = values - cached_tags
 
-        format_tags = ','.join(['%s'] * len(tobecached))
-        sql = 'SELECT * FROM `tags` WHERE `tag` IN (%s)' % format_tags
+        if tobecached:
+            format_tags = ','.join(['%s'] * len(tobecached))
+            sql = 'SELECT * FROM `tags` WHERE `tag` IN (%s)' % format_tags
 
-        with self.db.cursor() as cursor:
-            cursor.execute(sql, list(tobecached))
-            for tag in cursor:
-                self.all_tags[tag['tag']] = tag['id']
+            with self.db.cursor() as cursor:
+                cursor.execute(sql, list(tobecached))
+                for tag in cursor:
+                    self.all_tags[tag['tag']] = tag['id']
 
         values = []
         for vid in videos:

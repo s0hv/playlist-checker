@@ -339,6 +339,7 @@ class PlaylistChecker:
         """
         data = data.encode('utf-8')
         for after in cmds:
+            logger.info(f'Running script "{after}"')
             try:
                 p = subprocess.Popen(shlex.split(after), stdin=subprocess.PIPE)
             except FileNotFoundError:
@@ -350,9 +351,9 @@ class PlaylistChecker:
                 out, err = p.communicate()
             except:
                 logger.exception('Failed to run script %s' % after)
-
-            if err:
-                print(err)
+            else:
+                if err:
+                    print(err)
 
     def get_new_deleted(self, deleted, site):
         """

@@ -110,6 +110,7 @@ class PlaylistChecker:
                 An list of tag names to be applied to every video in the videos
                 param
         """
+
         sql = 'INSERT IGNORE INTO `tags` (`tag`) VALUES (%s)'
         default_tags = [] if not default_tags else default_tags
         values = set(default_tags)
@@ -117,7 +118,7 @@ class PlaylistChecker:
 
         # Copy the list of videos since we don't wanna edit the original list
         videos = videos.copy()
-        for vid in videos.copy():
+        for vid in videos.copy():  # This copy is probably needed
             if not vid.data:
                 videos.remove(vid)
                 continue
@@ -454,6 +455,12 @@ class PlaylistChecker:
 
             for vid in cursor:
                 self.all_vids[vid['site']][vid['video_id']] = vid['id']
+
+            # Put all existing tags to cache
+            sql = 'SELECT * FROM `tags`'
+            cursor.execute(sql)
+            for tag in cursor:
+                self.all_tags[tag['tag']] = tag['id']
 
         playlists = self.config['playlists']
         logger.info(f'Checking a total of {len(playlists)} playlists')

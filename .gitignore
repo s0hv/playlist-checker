@@ -105,3 +105,6 @@ venv.bak/
 
 .idea/
 config.json
+.lock
+test.*
+error.json

@@ -347,9 +347,12 @@ class PlaylistChecker:
 
             p.stdin.write(data)
             try:
-                p.communicate()
+                out, err = p.communicate()
             except:
                 logger.exception('Failed to run script %s' % after)
+
+            if err:
+                print(err)
 
     def get_new_deleted(self, deleted, site):
         """
@@ -465,7 +468,8 @@ class PlaylistChecker:
 
         playlists = self.config['playlists']
         logger.info(f'Checking a total of {len(playlists)} playlists')
-        for playlist in playlists:
+        for idx, playlist in enumerate(playlists):
+            print(f'Processing {idx+1}/{len(playlists)}')
             playlist_id = playlist['playlist_id']
 
             # Ignore non whitelisted playlists if whitelist in use
@@ -489,7 +493,9 @@ class PlaylistChecker:
                     playlist_data['name'] = info['snippet']['title']
 
                 # Get videos
+                logger.debug('getting old ids')
                 old = self.get_playlist_video_ids(playlist_data['id'])
+                logger.debug('Getting items from youtube')
                 items, deleted, already_checked = playlist_checker.get_videos(self.already_checked[site])
 
                 # Get new deleted videos
@@ -500,6 +506,7 @@ class PlaylistChecker:
                 self.already_checked[site].update(deleted)
 
                 # Add new vids to db and update old items
+                logger.debug('Adding and updating vids')
                 self.add_and_update_vids(items, site)
 
                 # Put all vids in the playlist to a single list
@@ -552,6 +559,9 @@ class PlaylistChecker:
                     add_deleted = lambda: [vid.to_dict() for vid in deleted]
                     add_new_deleted = lambda: [vid.to_dict() for vid in new_deleted]
                     add_new = lambda: [vid.to_dict() for vid in new]
+
+                    print(f'{len(new_deleted)} newly deleted videos')
+                    print(f'{len(new)} new videos')
 
                     fields = {'deleted': add_deleted, 'new_deleted': add_new_deleted,
                               'new': add_new}

@@ -352,6 +352,8 @@ class PlaylistChecker:
             except:
                 logger.exception('Failed to run script %s' % after)
             else:
+                if out:
+                    print(out)
                 if err:
                     print(err)
 
@@ -540,6 +542,9 @@ class PlaylistChecker:
                 after = playlist.get('after', [])
                 after.extend(self.config.get('after', []))  # Default after command
 
+                if not after:
+                    print('No scripts to run after checking')
+
                 if after:
                     old = [d['video_id'] for d in old]
                     new = items - {k for k, v in self.all_vids[site].items() if
@@ -597,6 +602,8 @@ class PlaylistChecker:
             pass
 
         if self.threads:
+            logger.debug('Waiting for threads to finish')
+            print('Waiting for threads to finish')
             timeout = 900/len(self.threads)
             for thread in self.threads:
                 thread.join(timeout=timeout)

@@ -472,7 +472,7 @@ class PlaylistChecker:
         playlists = self.config['playlists']
         logger.info(f'Checking a total of {len(playlists)} playlists')
         for idx, playlist in enumerate(playlists):
-            print(f'Processing {idx+1}/{len(playlists)}')
+            print(f'Processing {idx+1}/{len(playlists)} {playlist["name"]}')
             playlist_id = playlist['playlist_id']
 
             # Ignore non whitelisted playlists if whitelist in use

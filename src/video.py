@@ -1,9 +1,9 @@
-from abc import ABC, abstractmethod
 import re
+from abc import ABC, abstractmethod
 from datetime import datetime
-from src.utils import get_yt_thumb
-from src.enums import Sites
 
+from src.enums import Sites
+from src.utils import get_yt_thumb
 
 hashtag_regex = re.compile('#\w+')
 
@@ -23,7 +23,6 @@ class BaseVideo(ABC):
     @title.setter
     def title(self, value):
         raise NotImplementedError
-
 
     @property
     @abstractmethod

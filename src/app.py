@@ -70,30 +70,32 @@ class PlaylistChecker:
         do_insert = videos_set - self.all_vid_ids[site]
         do_update = videos_set - do_insert
 
-        sql = 'INSERT INTO videos AS v (video_id, title, description, published_at, site, thumbnail) VALUES ' \
-              '%s'
+        if do_insert:
+            sql = 'INSERT INTO videos AS v (video_id, title, description, published_at, site, thumbnail) VALUES ' \
+                  '%s'
 
-        values = ((vid.video_id, vid.title, vid.description, vid.published_at, site, vid.thumbnail)
-                  for vid in do_insert)
+            values = ((vid.video_id, vid.title, vid.description, vid.published_at, site, vid.thumbnail)
+                      for vid in do_insert)
 
-        with self.conn.cursor() as cursor:
-            execute_values(cursor, sql, values, page_size=500)
+            with self.conn.cursor() as cursor:
+                execute_values(cursor, sql, values, page_size=800)
 
-        # https://stackoverflow.com/a/18799497/6046713
-        sql = 'UPDATE videos AS v SET ' \
-              'title=CASE WHEN v.title!=c.title THEN c.title ELSE v.title END, ' \
-              'description=CASE WHEN v.description!=c.description THEN c.description ELSE v.description END, ' \
-              'deleted=FALSE,' \
-              'thumbnail=COALESCE(c.thumbnail, v.thumbnail), ' \
-              'published_at=c.published_at ' \
-              'FROM (VALUES %s) AS c(video_id, title, description, published_at, site, thumbnail) ' \
-              'WHERE c.site=v.site AND c.video_id=v.video_id'
+        if do_update:
+            # https://stackoverflow.com/a/18799497/6046713
+            sql = 'UPDATE videos AS v SET ' \
+                  'title=CASE WHEN v.title!=c.title THEN c.title ELSE v.title END, ' \
+                  'description=CASE WHEN v.description!=c.description THEN c.description ELSE v.description END, ' \
+                  'deleted=FALSE,' \
+                  'thumbnail=COALESCE(c.thumbnail, v.thumbnail), ' \
+                  'published_at=c.published_at ' \
+                  'FROM (VALUES %s) AS c(video_id, title, description, published_at, site, thumbnail) ' \
+                  'WHERE c.site=v.site AND c.video_id=v.video_id'
 
-        values = ((vid.video_id, vid.title, vid.description, vid.published_at, site, vid.thumbnail)
-                  for vid in do_update)
+            values = ((vid.video_id, vid.title, vid.description, vid.published_at, site, vid.thumbnail)
+                      for vid in do_update)
 
-        with self.conn.cursor() as cursor:
-            execute_values(cursor, sql, values, page_size=500)
+            with self.conn.cursor() as cursor:
+                execute_values(cursor, sql, values, page_size=800)
 
         self.conn.commit()
 
@@ -119,7 +121,7 @@ class PlaylistChecker:
             values = ((vid.video_id, t, site, t) for vid in do_insert)
 
             with self.conn.cursor() as cursor:
-                execute_values(cursor, sql, values, page_size=500,
+                execute_values(cursor, sql, values, page_size=1000,
                                template=f"(%s, 'Deleted video', %s, {site}, True, %s)")
 
         if do_update:
@@ -230,7 +232,7 @@ class PlaylistChecker:
             sql = 'INSERT INTO channels (channel_id, name, thumbnail) VALUES %s'
 
             with self.conn.cursor() as cursor:
-                execute_values(cursor, sql, [(c.channel_id, c.name, c.thumbnail) for c in channels], page_size=800)
+                execute_values(cursor, sql, [(c.channel_id, c.name, c.thumbnail) for c in channels], page_size=1000)
 
         if do_update:
             sql = 'UPDATE channels AS c SET ' \
@@ -240,7 +242,7 @@ class PlaylistChecker:
                   'WHERE v.channel_id=c.channel_id'
 
             with self.conn.cursor() as cursor:
-                execute_values(cursor, sql, [(c.channel_id, c.name, c.thumbnail) for c in channels], page_size=800)
+                execute_values(cursor, sql, [(c.channel_id, c.name, c.thumbnail) for c in channels], page_size=1000)
 
         self.conn.commit()
 
@@ -286,7 +288,7 @@ class PlaylistChecker:
             data.append((channel_id, vid_id))
 
         with self.conn.cursor() as cursor:
-            execute_batch(cursor, sql, data, page_size=1000)
+            execute_batch(cursor, sql, data, page_size=1500)
 
         self.conn.commit()
 
@@ -307,7 +309,7 @@ class PlaylistChecker:
         values = ((playlist_id, video_id) for video_id in video_ids)
 
         with self.conn.cursor() as cursor:
-            execute_values(cursor, sql, values, page_size=1000)
+            execute_values(cursor, sql, values, page_size=2000)
 
         self.conn.commit()
 

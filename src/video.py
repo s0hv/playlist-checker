@@ -84,6 +84,9 @@ class BaseVideo(ABC):
     def __hash__(self):
         return hash(self.video_id)
 
+    def __repr__(self):
+        return str(self.video_id)
+
 
 class YTVideo(BaseVideo):
     SITE = Sites.Youtube

@@ -87,7 +87,7 @@ class PlaylistChecker:
                   'description=CASE WHEN v.description!=c.description THEN c.description ELSE v.description END, ' \
                   'deleted=FALSE,' \
                   'thumbnail=COALESCE(c.thumbnail, v.thumbnail), ' \
-                  'published_at=c.published_at ' \
+                  'published_at=CASE WHEN c.published_at >= v.published_at THEN v.published_at ELSE c.published_at END ' \
                   'FROM (VALUES %s) AS c(video_id, title, description, published_at, site, thumbnail) ' \
                   'WHERE c.site=v.site AND c.video_id=v.video_id'
 
@@ -118,7 +118,7 @@ class PlaylistChecker:
             t = datetime.utcnow()
             sql = 'INSERT INTO videos (video_id, title, published_at, site, deleted, deleted_at) VALUES %s'
 
-            values = ((vid.video_id, t, site, t) for vid in do_insert)
+            values = ((vid.video_id, t, t) for vid in do_insert)
 
             with self.conn.cursor() as cursor:
                 execute_values(cursor, sql, values, page_size=1000,

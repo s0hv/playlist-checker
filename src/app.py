@@ -9,6 +9,7 @@ import psycopg2
 from psycopg2.extras import DictCursor, execute_batch, execute_values
 
 from src.api import YTApi
+from src.downloaders import thumbnail
 from src.enums import Sites
 from src.playlist import YTPlaylist
 
@@ -551,6 +552,7 @@ class PlaylistChecker:
             old = self.get_playlist_video_ids(playlist_data['id'])
             logger.debug('Getting items from youtube')
             items, deleted, already_checked = playlist_checker.get_videos(self.already_checked[site])
+            thumbnail.bulk_download_thumbnails(items, site)
 
             # Get new deleted videos
             new_deleted = self.get_new_deleted(deleted, site)

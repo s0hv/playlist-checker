@@ -108,3 +108,6 @@ config.json
 .lock
 test.*
 error.json
+
+# Video data
+data/

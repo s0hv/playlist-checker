@@ -162,3 +162,8 @@ class YTVideo(BaseVideo):
                 'title': self.title or 'Deleted video',
                 'channel_name': self.channel_name,
                 'channel_id': self.channel_id}
+
+
+SITE_CLASSES = {
+    Sites.Youtube: YTVideo
+}

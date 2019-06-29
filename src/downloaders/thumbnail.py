@@ -4,7 +4,7 @@ import time
 import requests
 
 SITE_OPTIONS = {
-    0: {'CHUNK_SIZE': 5, 'SLEEP': 3000}
+    0: {'CHUNK_SIZE': 5, 'SLEEP': 3}
 }
 
 

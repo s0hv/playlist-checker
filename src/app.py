@@ -9,9 +9,10 @@ import psycopg2
 from psycopg2.extras import DictCursor, execute_batch, execute_values
 
 from src.api import YTApi
-from src.downloaders import thumbnail
+from src.downloaders import thumbnail, video as video_downloader
 from src.enums import Sites
 from src.playlist import YTPlaylist
+from src.video import SITE_CLASSES
 
 logger = logging.getLogger('debug')
 
@@ -381,6 +382,22 @@ class PlaylistChecker:
             cursor.execute(sql)
             return cursor.fetchall()
 
+    def iter_videos_to_download(self):
+        sql = 'SELECT site, id, video_id, downloaded_format, download_filename, download_type FROM videos WHERE download_type IS NOT NULL AND deleted=FALSE'
+
+        with self.conn.cursor() as cursor:
+            cursor.execute(sql)
+            for row in cursor:
+                yield row
+
+    def update_vid_filename(self, filename, download_format, video_id):
+        sql = 'UPDATE videos SET download_filename=%s, downloaded_format=%s WHERE id=%s'
+
+        with self.conn.cursor() as cursor:
+            cursor.execute(sql, (filename, download_format, video_id))
+
+        self.conn.commit()
+
     @staticmethod
     def run_after(data, cmds):
         """
@@ -653,6 +670,19 @@ class PlaylistChecker:
         if after:
             # TODO do when it when you need it
             pass
+
+        logger.info('Downloading videos')
+
+        for row in self.iter_videos_to_download():
+            site = row['site']
+            filename = video_downloader.download_video(SITE_CLASSES[site](row['video_id']),
+                                                       row,
+                                                       {'format': row['download_type']})
+
+            if filename:
+                self.update_vid_filename(filename, row['download_type'], row['id'])
+
+        logger.info('Videos downloaded')
 
         if self.threads:
             logger.debug('Waiting for threads to finish')

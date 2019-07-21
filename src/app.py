@@ -25,6 +25,7 @@ class PlaylistChecker:
         self.all_vids = {site: {} for site in list(Sites.__members__.values())}
         self.all_vid_ids = {site: set() for site in list(Sites.__members__.values())}
         self.channel_cache = {site: set() for site in list(Sites.__members__.values())}
+        self.db_channel_cache = {site: set() for site in list(Sites.__members__.values())}
 
         self._conn = psycopg2.connect(host=self.config['db_host'],
                                       port=self.config['db_port'],
@@ -227,14 +228,16 @@ class PlaylistChecker:
 
         """
         channels = set(channels)
-        do_insert = channels - self.channel_cache[site]
+        do_insert = channels - self.db_channel_cache[site]
         do_update = channels - do_insert
 
         if do_insert:
-            sql = 'INSERT INTO channels (channel_id, name, thumbnail) VALUES %s'
+            sql = 'INSERT INTO channels (channel_id, name, thumbnail, site) VALUES %s'
 
             with self.conn.cursor() as cursor:
-                execute_values(cursor, sql, [(c.channel_id, c.name, c.thumbnail) for c in channels], page_size=1000)
+                execute_values(cursor, sql, [(c.channel_id, c.name, c.thumbnail, site) for c in do_insert], page_size=1000)
+
+            self.db_channel_cache[site].update([c.channel_id for c in do_insert])
 
         if do_update:
             sql = 'UPDATE channels AS c SET ' \
@@ -244,7 +247,7 @@ class PlaylistChecker:
                   'WHERE v.channel_id=c.channel_id'
 
             with self.conn.cursor() as cursor:
-                execute_values(cursor, sql, [(c.channel_id, c.name, c.thumbnail) for c in channels], page_size=1000)
+                execute_values(cursor, sql, [(c.channel_id, c.name, c.thumbnail) for c in do_update], page_size=1000)
 
         self.conn.commit()
 
@@ -281,6 +284,7 @@ class PlaylistChecker:
         for vid in videos:
             channel_id = channel_ids.get(vid.channel_id)
             if not channel_id:
+                logger.info(f'Channel not found for video {vid}')
                 continue
 
             vid_id = self.all_vids[site].get(vid.video_id)
@@ -485,7 +489,7 @@ class PlaylistChecker:
         deleted_format = ','.join(['%s']*len(deleted))
         sql = 'SELECT v.video_id, v.title, c.name, c.channel_id FROM videos v INNER JOIN channelVideos cv ' \
               'ON cv.video_id=v.id INNER JOIN channels c ON cv.channel_id = c.id ' \
-             f'WHERE site={site} AND v.video_id IN (%s)' % deleted_format
+             f'WHERE v.site={site} AND v.video_id IN (%s)' % deleted_format
 
         with self.conn.cursor() as cursor:
             cursor.execute(sql, [(vid.video_id,) for vid in deleted])
@@ -536,6 +540,12 @@ class PlaylistChecker:
             for tag in cursor:
                 self.all_tags[tag['tag']] = tag['id']
 
+            # Put all inserted channel ids to cache
+            sql = 'SELECT site, channel_id FROM channels'
+            cursor.execute(sql)
+            for channel in cursor:
+                self.db_channel_cache[channel['site']].add(channel['channel_id'])
+
         playlists = self.config['playlists']
         logger.info(f'Checking a total of {len(playlists)} playlists')
         for idx, playlist in enumerate(playlists):
@@ -568,6 +578,7 @@ class PlaylistChecker:
             logger.debug('getting old ids')
             old = self.get_playlist_video_ids(playlist_data['id'])
             logger.debug('Getting items from youtube')
+            # Items contains undeleted videos
             items, deleted, already_checked = playlist_checker.get_videos(self.already_checked[site])
             thumbnail.bulk_download_thumbnails(items, site)
 
@@ -598,10 +609,15 @@ class PlaylistChecker:
             self.add_vid_tags(items, site)
 
             # Cache channels
-            cached_channels = {v.channel_id for v in items}
-            channels = cached_channels - self.channel_cache[site]
-            cached_channels = cached_channels - channels
-            channels = playlist_checker.get_channels(channels)
+            all_channels = {v.channel_id for v in items}
+            uncached = all_channels - self.channel_cache[site]
+            cached_channels = all_channels - uncached
+            del all_channels
+
+            # Get channel data
+            channels = playlist_checker.get_channels(uncached)
+
+            # Update channel cache
             self.channel_cache[site].update(channels)
             channels.extend(cached_channels)
 

@@ -1,9 +1,6 @@
-import requests
 from enum import Enum
 import logging
-from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-
 
 logger = logging.getLogger('debug')
 
@@ -46,6 +43,7 @@ class YTApi:
         _max_results = min(50, max_results)
         params = {'part': part, 'playlistId': playlist_id,
                   'maxResults': _max_results}
+        js = None
 
         while max_results > 0:
             if page_token:
@@ -66,6 +64,10 @@ class YTApi:
 
             max_results -= _max_results
             _max_results = min(50, max_results)
+
+        if js:
+            js['items'] = all_items
+            return js
 
     def playlist_info(self, playlist_id, part):
         if isinstance(part, Part):

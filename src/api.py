@@ -1,5 +1,6 @@
-from enum import Enum
 import logging
+from enum import Enum
+
 from googleapiclient.errors import HttpError
 
 logger = logging.getLogger('debug')
@@ -65,7 +66,7 @@ class YTApi:
             max_results -= _max_results
             _max_results = min(50, max_results)
 
-        if js:
+        if js and all_items:
             js['items'] = all_items
             return js
 

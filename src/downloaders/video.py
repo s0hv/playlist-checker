@@ -12,7 +12,7 @@ SLEEP = [3, 6]
 
 BASE_OPTS = {
     'format': 'bestvideo+bestaudio',
-    'merge_output_format': 'mp4',
+    'merge_output_format': 'mkv',
     'outtmpl': '%(format_id)s-%(id)s.%(ext)s',
     'restrictfilenames': True,
     'noplaylist': True,

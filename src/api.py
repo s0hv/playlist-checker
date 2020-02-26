@@ -55,7 +55,7 @@ class YTApi:
                 js = self.client.playlistItems().list(**params).execute()
             except HttpError:
                 logger.exception('Failed to get playlist')
-                return
+                raise
 
             page_token = js.get('nextPageToken')
             all_items.extend(js.get('items', []))
@@ -81,7 +81,7 @@ class YTApi:
             data = self.client.playlists().list(**params).execute()
         except HttpError:
             logger.exception('Failed to get playlist info because of an error')
-            return
+            raise
 
         if not data['items']:
             logger.warning(f'Could not find playlist {playlist_id}')
@@ -106,7 +106,7 @@ class YTApi:
                 js = self.client.videos().list(**params).execute()
             except HttpError:
                 logger.exception('Failed to get video info')
-                return
+                raise
 
             page_token = js.get('nextPageToken')
             all_items.extend(js.get('items', []))
@@ -132,8 +132,8 @@ class YTApi:
             try:
                 js = self.client.channels().list(**params).execute()
             except HttpError:
-                logger.exception('Failed to get video info')
-                return
+                logger.exception('Failed to get channel info')
+                raise
 
             page_token = js.get('nextPageToken')
             all_items.extend(js.get('items', []))

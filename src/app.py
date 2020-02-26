@@ -8,7 +8,7 @@ from datetime import datetime
 import psycopg2
 from psycopg2.extras import DictCursor, execute_batch, execute_values
 
-from src.api import YTApi
+from src.api import YTApi, HttpError
 from src.downloaders import thumbnail, video as video_downloader
 from src.enums import Sites
 from src.playlist import YTPlaylist
@@ -578,8 +578,14 @@ class PlaylistChecker:
             logger.debug('getting old ids')
             old = self.get_playlist_video_ids(playlist_data['id'])
             logger.debug('Getting items from youtube')
-            # Items contains undeleted videos
-            items, deleted, already_checked = playlist_checker.get_videos(self.already_checked[site])
+
+            try:
+                # Items contains undeleted videos
+                items, deleted, already_checked = playlist_checker.get_videos(self.already_checked[site])
+            except HttpError:
+                # Skip on playlist http error
+                continue
+
             thumbnail.bulk_download_thumbnails(items, site)
 
             # Get new deleted videos
@@ -614,15 +620,19 @@ class PlaylistChecker:
             cached_channels = all_channels - uncached
             del all_channels
 
-            # Get channel data
-            channels = playlist_checker.get_channels(uncached)
+            try:
+                # Get channel data
+                channels = playlist_checker.get_channels(uncached)
+            except HttpError:
+                pass
+            else:
+                # Only update channel infos if we successfully fetch them
+                # Update channel cache
+                self.channel_cache[site].update(channels)
+                channels.extend(cached_channels)
 
-            # Update channel cache
-            self.channel_cache[site].update(channels)
-            channels.extend(cached_channels)
-
-            # Add channels and channel videos
-            self.add_channel_videos(items, channels, site)
+                # Add channels and channel videos
+                self.add_channel_videos(items, channels, site)
 
             # After processing of data by external scripts
             after = playlist.get('after', [])

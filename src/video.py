@@ -153,7 +153,7 @@ class YTVideo(BaseVideo):
     def published_at(self):
         t = self.data['snippet'].get('publishedAt')
         if t:
-            t = datetime.strptime(t, '%Y-%m-%dT%H:%M:%S.%fZ')
+            t = datetime.strptime(t, '%Y-%m-%dT%H:%M:%SZ')
 
         return t
 

@@ -4,13 +4,15 @@ import shlex
 import subprocess
 import threading
 from datetime import datetime
+from typing import List, Dict
 
 import psycopg2
 from psycopg2.extras import DictCursor, execute_batch, execute_values
 
 from src.api import YTApi, HttpError
+from src.config import Config, Script
 from src.downloaders import thumbnail, video as video_downloader
-from src.enums import Sites
+from src.enum import Site
 from src.playlist import YTPlaylist
 from src.video import SITE_CLASSES
 
@@ -18,24 +20,24 @@ logger = logging.getLogger('debug')
 
 
 class PlaylistChecker:
-    def __init__(self, config):
-        self.config = config
-        self.already_checked = {site: set() for site in list(Sites.__members__.values())}
-        # Dict of dicts in the form {site: {video_id: db_id}}
-        self.all_vids = {site: {} for site in list(Sites.__members__.values())}
-        self.all_vid_ids = {site: set() for site in list(Sites.__members__.values())}
-        self.channel_cache = {site: set() for site in list(Sites.__members__.values())}
-        self.db_channel_cache = {site: set() for site in list(Sites.__members__.values())}
+    def __init__(self, config: Config = None):
+        if not config:
+            config = Config.load()
 
-        self._conn = psycopg2.connect(host=self.config['db_host'],
-                                      port=self.config['db_port'],
-                                      user=self.config['db_user'],
-                                      password=self.config['db_pass'],
-                                      dbname=self.config['db'],
+        self.config = config
+
+        self.already_checked = {site: set() for site in list(Site.__members__.values())}
+        # Dict of dicts in the form {site: {video_id: db_id}}
+        self.all_vids = {site: {} for site in list(Site.__members__.values())}
+        self.all_vid_ids = {site: set() for site in list(Site.__members__.values())}
+        self.channel_cache = {site: set() for site in list(Site.__members__.values())}
+        self.db_channel_cache = {site: set() for site in list(Site.__members__.values())}
+
+        self._conn = psycopg2.connect(self.config.db_conn_string,
                                       cursor_factory=DictCursor)
         self._conn.set_client_encoding('UTF8')
 
-        self._yt_api = YTApi(self.config['yt_api'])
+        self._yt_api = YTApi(self.config.yt_token)
         self.all_tags = {}
         self.threads = []
 
@@ -189,14 +191,14 @@ class PlaylistChecker:
         for vid in videos:
             video_id = self.all_vids[site].get(vid.video_id)
             if not video_id:
-                print('Video id not found with %s' % vid)
+                logger.warning('Video id not found with %s' % vid)
                 continue
 
             # Add video specific tags
             for tag in vid.tags:
                 tag_id = self.all_tags.get(tag.lower())
                 if not tag_id:
-                    print('Tag %s not found' % tag)
+                    logger.warning('Tag %s not found' % tag)
                     continue
 
                 values.append((tag_id, video_id))
@@ -387,7 +389,9 @@ class PlaylistChecker:
             return cursor.fetchall()
 
     def iter_videos_to_download(self):
-        sql = 'SELECT site, id, video_id, downloaded_format, download_filename, download_type FROM videos WHERE download_type IS NOT NULL AND deleted=FALSE'
+        sql = 'SELECT site, id, video_id, downloaded_format, download_filename, download_type ' \
+              'FROM videos ' \
+              'WHERE download_type IS NOT NULL AND deleted=FALSE'
 
         with self.conn.cursor() as cursor:
             cursor.execute(sql)
@@ -403,29 +407,44 @@ class PlaylistChecker:
         self.conn.commit()
 
     @staticmethod
-    def run_after(data, cmds):
+    def run_after(fields: Dict, optional_fields: Dict, cmds: List[Script]):
         """
         Runs all specified commands and inputs data encoded in utf-8 to stdin
         """
-        data = data.encode('utf-8')
         for after in cmds:
-            logger.info(f'Running script "{after}"')
+            logger.info(f'Running script "{after.name}"')
+            cmd = after.script
+
+            if not after.required_fields:
+                data = {
+                    **fields,
+                    **optional_fields
+                }
+            else:
+                data = {
+                    **fields
+                }
+                for required_field in after.required_fields:
+                    data[required_field.value] = optional_fields[required_field.value]
+
             try:
-                p = subprocess.Popen(shlex.split(after), stdin=subprocess.PIPE)
+                p = subprocess.Popen(shlex.split(cmd), stdin=subprocess.PIPE)
             except FileNotFoundError:
-                logger.exception('File "%s" not found' % after)
+                logger.exception('File "%s" not found' % cmd)
                 continue
 
-            p.stdin.write(data)
+            p.stdin.write(
+                json.dumps(data, ensure_ascii=False).encode('utf-8')
+            )
             try:
                 out, err = p.communicate()
             except:
                 logger.exception('Failed to run script %s' % after)
             else:
                 if out:
-                    print(out)
+                    logger.info(out)
                 if err:
-                    print(err)
+                    logger.error(err)
 
     def get_new_deleted(self, deleted, site):
         """
@@ -546,22 +565,23 @@ class PlaylistChecker:
             for channel in cursor:
                 self.db_channel_cache[channel['site']].add(channel['channel_id'])
 
-        playlists = self.config['playlists']
+        playlists = self.config.playlists
         logger.info(f'Checking a total of {len(playlists)} playlists')
         for idx, playlist in enumerate(playlists):
-            print(f'Processing {idx+1}/{len(playlists)} {playlist["name"]}')
-            playlist_id = playlist['playlist_id']
+            playlist_id = playlist.playlist_id
 
             # Ignore non whitelisted playlists if whitelist in use
             if whitelist and playlist_id not in whitelist:
                 continue
 
+            logger.info(f'Processing {idx+1}/{len(playlists)} {playlist.name}')
+
             playlist_data = _playlists.get(playlist_id, {})
-            site = playlist['site']
+            site = playlist.site
             logger.info(f'Checking playlist {playlist_id} on site {site}')
 
             # Create playlist by site
-            if site == Sites.Youtube:
+            if site == Site.Youtube:
                 playlist_checker = YTPlaylist(self.conn, self.yt_api, playlist_id)
                 if not playlist_data:
                     logger.info('New playlist getting playlist info')
@@ -635,11 +655,11 @@ class PlaylistChecker:
                 self.add_channel_videos(items, channels, site)
 
             # After processing of data by external scripts
-            after = playlist.get('after', [])
-            after.extend(self.config.get('after', []))  # Default after command
+            after = playlist.after or []
+            after.extend(self.config.after or [])  # Default after command
 
             if not after:
-                print('No scripts to run after checking')
+                logger.debug('No scripts to run after checking')
 
             if after:
                 old = [d['video_id'] for d in old]
@@ -649,70 +669,54 @@ class PlaylistChecker:
                 # Get info of rest of the deleted vids
                 deleted = self.get_deleted_info(deleted, site)
 
-                # Base json format
-                d = {'url_format': playlist_checker.url_format,
-                     'channel_format': playlist_checker.channel_url_format,
-                     'playlist_format': playlist_checker.playlist_url_format,
-                     'playlist_id': playlist_id,
-                     'playlist_name': playlist_data.get('name', playlist.get('name', 'Unnamed'))}
+                logger.info(f'{len(new_deleted)} newly deleted videos')
+                logger.info(f'{len(new)} new videos')
 
-                # We don't want to create the lists for nothing so we call
-                # the generators on demand
-                add_deleted = lambda: [vid.to_dict() for vid in deleted]
-                add_new_deleted = lambda: [vid.to_dict() for vid in new_deleted]
-                add_new = lambda: [vid.to_dict() for vid in new]
+                fields = {
+                    'url_format': playlist_checker.url_format,
+                    'channel_format': playlist_checker.channel_url_format,
+                    'playlist_format': playlist_checker.playlist_url_format,
+                    'playlist_id': playlist_id,
+                    'playlist_name': playlist_data.get('name', playlist.name)
+                }
+                optional_fields = {
+                    'deleted': [vid.to_dict() for vid in deleted],
+                    'new_deleted': [vid.to_dict() for vid in new_deleted],
+                    'new': [vid.to_dict() for vid in new]
+                }
 
-                print(f'{len(new_deleted)} newly deleted videos')
-                print(f'{len(new)} new videos')
-
-                fields = {'deleted': add_deleted, 'new_deleted': add_new_deleted,
-                          'new': add_new}
-
-                # Get all the fields the scripts require
-                required_fields = set()
-                required_fields.update(playlist.get('required_fields', []))
-                required_fields.update(self.config.get('required_fields', []))
-                if required_fields:
-                    for field in required_fields:
-                        f = fields.get(field)
-                        if not f:
-                            continue
-
-                        d[field] = f()
-                else:
-                    d.update({'deleted': add_deleted(),
-                              'new_deleted': add_new_deleted(),
-                              'new': add_new()})
-
-                s = json.dumps(d, ensure_ascii=False, indent=2)
-
-                thread = threading.Thread(target=self.run_after, args=(s, after), daemon=True)
+                thread = threading.Thread(target=self.run_after, args=(fields, optional_fields, after), daemon=True)
                 thread.start()
                 self.threads.append(thread)
 
-        logger.info(f'Done checking {playlist_id}')
+            logger.info(f'Done checking {playlist_id}')
 
-        after = self.config.get('after_all')
-        if after:
+        after_all = self.config.after_all
+        if after_all:
             # TODO do when it when you need it
             pass
 
         logger.info('Downloading videos')
 
+        downloads = 0
         for row in self.iter_videos_to_download():
+            if downloads >= self.config.max_downloads_per_run:
+                break
+
             site = row['site']
             filename = video_downloader.download_video(SITE_CLASSES[site](row['video_id']),
                                                        row,
-                                                       {'format': row['download_type']})
+                                                       {'format': row['download_type']},
+                                                       self.config.download_sleep_interval)
 
             if filename:
                 self.update_vid_filename(filename, row['download_type'], row['id'])
+                downloads += 1
 
         logger.info('Videos downloaded')
 
         if self.threads:
             logger.debug('Waiting for threads to finish')
-            print('Waiting for threads to finish')
             timeout = 900/len(self.threads)
             for thread in self.threads:
                 thread.join(timeout=timeout)
@@ -720,4 +724,3 @@ class PlaylistChecker:
             if list(filter(lambda t: t.is_alive(), self.threads)):
                 logger.warning('Threads open even after 15min. Force closing')
                 exit()
-

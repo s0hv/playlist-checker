@@ -1,17 +1,24 @@
-import json
+import argparse
 import logging
 import os
-import filelock
-from filelock import Timeout
-from src.app import PlaylistChecker
 import sys
-import argparse
 
+import filelock
+from dotenv import load_dotenv
+from filelock import Timeout
+
+load_dotenv()
+
+from src.app import PlaylistChecker
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 logger = logging.getLogger('debug')
 logger.setLevel(logging.DEBUG)
 handler = logging.FileHandler(filename=os.path.join(dir_path, 'debug.log'), encoding='utf-8', mode='a')
+handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
+logger.addHandler(handler)
+
+handler = logging.StreamHandler(sys.stdout)
 handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
 logger.addHandler(handler)
 
@@ -38,10 +45,7 @@ if __name__ == '__main__':
         logger.info('Could not acquire lock file. Aborting')
         exit()
 
-    with open(os.path.join(dir_path, 'config.json'), 'r', encoding='utf-8') as f:
-        config = json.load(f)
-
-    checker = PlaylistChecker(config)
+    checker = PlaylistChecker()
     args = sys.argv
     args = parser.parse_args(args[1:])
 

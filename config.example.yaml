@@ -1,0 +1,27 @@
+download_sleep_interval:
+  min: 3
+  max: 6
+
+max_downloads_per_run: 50
+
+sites:
+  - &YouTube 0
+
+scripts:
+  - &test_script
+    name: "Test"
+    required_fields:
+      - new
+      - deleted
+      - new_deleted
+    script: echo 1
+
+after:
+  - *test_script
+
+playlists:
+  - name: "test"
+    playlist_id: "id"
+    site: *YouTube
+    after:
+      - *test_script

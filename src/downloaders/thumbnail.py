@@ -3,12 +3,14 @@ import time
 
 import requests
 
+from src.enum import Site
+
 SITE_OPTIONS = {
-    0: {'CHUNK_SIZE': 5, 'SLEEP': 3}
+    0: {'CHUNK_SIZE': 5, 'SLEEP': 2}
 }
 
 
-def download_thumbnail(video, site):
+def download_thumbnail(video, site: Site):
     """
     Downloads a thumbnail of the vid if it doesn't exist
     Args:
@@ -24,7 +26,7 @@ def download_thumbnail(video, site):
         return False
 
     # We hope all images are jpg
-    path = os.path.join('data', str(site), video.video_id + '.jpg')
+    path = os.path.join('data', str(site.value), video.video_id + '.jpg')
 
     if os.path.exists(path):
         return None
@@ -42,7 +44,7 @@ def download_thumbnail(video, site):
             f.write(chunk)
 
 
-def bulk_download_thumbnails(videos, site):
+def bulk_download_thumbnails(videos, site: Site):
     CHUNK_SIZE = SITE_OPTIONS[site]['CHUNK_SIZE']
     SLEEP = SITE_OPTIONS[site]['SLEEP']
 

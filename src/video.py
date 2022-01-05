@@ -2,10 +2,10 @@ import re
 from abc import ABC, abstractmethod
 from datetime import datetime
 
-from src.enums import Sites
+from src.enum import Site
 from src.utils import get_yt_thumb
 
-hashtag_regex = re.compile('#\w+')
+hashtag_regex = re.compile(r'#\w+')
 
 
 class BaseVideo(ABC):
@@ -89,7 +89,7 @@ class BaseVideo(ABC):
 
 
 class YTVideo(BaseVideo):
-    SITE = Sites.Youtube
+    SITE = Site.Youtube
 
     def __init__(self, video_id, **data):
         super().__init__(video_id, data)
@@ -165,5 +165,5 @@ class YTVideo(BaseVideo):
 
 
 SITE_CLASSES = {
-    Sites.Youtube: YTVideo
+    Site.Youtube: YTVideo
 }

@@ -105,9 +105,11 @@ venv.bak/
 
 .idea/
 config.json
+config.yaml
 .lock
 test.*
 error.json
+.run
 
 # Video data
 data/

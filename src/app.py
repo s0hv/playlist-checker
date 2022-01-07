@@ -740,7 +740,8 @@ class PlaylistChecker:
             self.add_playlist_vids(playlist_row.id, vid_ids.values())
 
             # Update download cols
-            self.update_archived_playlist_videos(playlist_row.id)
+            if playlist.archive:
+                self.update_archived_playlist_videos(playlist_row.id)
 
             if deleted:
                 self.add_deleted_vids(deleted, site)

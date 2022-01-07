@@ -87,7 +87,7 @@ class PlaylistChecker:
         with self.conn.transaction():
             with self.conn.cursor() as cur:
                 cur.execute(sql, (playlist_id,))
-                logger.info(f'Updated archive {cur.rowcount}')
+                logger.info(f'Set download col for {cur.rowcount} videos')
 
     def add_and_update_vids(self, videos: Iterable[BaseVideo], site: int | Site):
         """
@@ -395,7 +395,7 @@ class PlaylistChecker:
         try:
             with self.conn.cursor() as cursor:
                 cursor.execute(sql, [playlist_id, video_ids])
-                logger.info(f'user removed {cursor.rowcount} videos from playlist {playlist_id}')
+                logger.info(f'User removed {cursor.rowcount} videos from playlist {playlist_id}')
 
             self.conn.commit()
         except Exception:

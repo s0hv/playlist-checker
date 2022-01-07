@@ -3,20 +3,28 @@ import logging
 import shlex
 import subprocess
 import threading
+from collections.abc import Iterable
+from contextlib import contextmanager
 from datetime import datetime
-from typing import List, Dict
+from typing import List, TypeVar, Sequence, Optional, Type, Generator
 
-import psycopg2
-from psycopg2.extras import DictCursor, execute_batch, execute_values
+import psycopg
+from psycopg import Cursor
+from psycopg.rows import class_row, dict_row
 
 from src.api import YTApi, HttpError
+from src.channel import BaseChannel
 from src.config import Config, Script
+from src.db import models
+from src.db.utils import execute_values
 from src.downloaders import thumbnail, video as video_downloader
 from src.enum import Site
 from src.playlist import YTPlaylist
-from src.video import SITE_CLASSES
+from src.video import SITE_CLASSES, BaseVideo
 
 logger = logging.getLogger('debug')
+T = TypeVar('T')
+BaseVideoT = TypeVar('BaseVideoT', bound=BaseVideo)
 
 
 class PlaylistChecker:
@@ -33,27 +41,55 @@ class PlaylistChecker:
         self.channel_cache = {site: set() for site in list(Site.__members__.values())}
         self.db_channel_cache = {site: set() for site in list(Site.__members__.values())}
 
-        self._conn = psycopg2.connect(self.config.db_conn_string,
-                                      cursor_factory=DictCursor)
-        self._conn.set_client_encoding('UTF8')
+        self._conn = None
 
         self._yt_api = YTApi(self.config.yt_token)
         self.all_tags = {}
         self.threads = []
 
     @staticmethod
-    def datetime2sql(datetime):
-        return '{0.year}-{0.month}-{0.day} {0.hour}:{0.minute}:{0.second}'.format(datetime)
+    def with_connection(fn):
+        def wrapper(self, *args, **kwargs):
+            with psycopg.connect(self.config.db_conn_string,
+                                 row_factory=dict_row) as conn:
+                self._conn = conn
+                fn(self, *args, **kwargs)
+
+        return wrapper
 
     @property
-    def conn(self):
+    def conn(self) -> psycopg.Connection:
+        if self._conn is None:
+            raise ValueError('Connection was not initialized')
+
         return self._conn
+
+    @contextmanager
+    def class_cursor(self, cls: Type[T]) -> Cursor[T]:
+        with self.conn.cursor(row_factory=class_row(cls)) as cur:
+            yield cur
 
     @property
     def yt_api(self):
         return self._yt_api
 
-    def add_and_update_vids(self, videos, site):
+    def update_archived_playlist_videos(self, playlist_id: int):
+        """
+        Use when archive property is set to true on a playlist.
+        Will set the download flag to true on each video in the playlist
+        """
+        sql = '''
+        UPDATE videos v SET download=TRUE
+        FROM playlistvideos pv
+        WHERE pv.playlist_id=%s AND v.id=pv.video_id AND v.download=FALSE
+        '''
+
+        with self.conn.transaction():
+            with self.conn.cursor() as cur:
+                cur.execute(sql, (playlist_id,))
+                logger.info(f'Updated archive {cur.rowcount}')
+
+    def add_and_update_vids(self, videos: Iterable[BaseVideo], site: int | Site):
         """
         Adds new videos to database and updates the following properties from
         duplicate entries:
@@ -75,87 +111,96 @@ class PlaylistChecker:
         do_insert = videos_set - self.all_vid_ids[site]
         do_update = videos_set - do_insert
 
-        if do_insert:
-            sql = 'INSERT INTO videos AS v (video_id, title, description, published_at, site, thumbnail) VALUES ' \
-                  '%s'
+        if not (do_insert or do_update):
+            return
 
-            values = ((vid.video_id, vid.title, vid.description, vid.published_at, site, vid.thumbnail)
-                      for vid in do_insert)
+        site = int(site)
 
-            with self.conn.cursor() as cursor:
-                execute_values(cursor, sql, values, page_size=800)
+        with self.conn.transaction():
+            if do_insert:
+                sql = 'INSERT INTO videos AS v (video_id, title, description, published_at, site, thumbnail) ' \
+                      'VALUES %s'
 
-        if do_update:
-            # https://stackoverflow.com/a/18799497/6046713
-            sql = 'UPDATE videos AS v SET ' \
-                  'title=CASE WHEN v.title!=c.title THEN c.title ELSE v.title END, ' \
-                  'description=CASE WHEN v.description!=c.description THEN c.description ELSE v.description END, ' \
-                  'deleted=FALSE,' \
-                  'thumbnail=COALESCE(c.thumbnail, v.thumbnail), ' \
-                  'published_at=CASE WHEN c.published_at >= v.published_at THEN v.published_at ELSE c.published_at END ' \
-                  'FROM (VALUES %s) AS c(video_id, title, description, published_at, site, thumbnail) ' \
-                  'WHERE c.site=v.site AND c.video_id=v.video_id'
+                values = tuple(
+                    (vid.video_id, vid.title, vid.description, vid.published_at, site, vid.thumbnail)
+                    for vid in do_insert
+                )
 
-            values = ((vid.video_id, vid.title, vid.description, vid.published_at, site, vid.thumbnail)
-                      for vid in do_update)
+                with self.conn.cursor() as cursor:
+                    execute_values(cursor, sql, values, page_size=500)
 
-            with self.conn.cursor() as cursor:
-                execute_values(cursor, sql, values, page_size=800)
+            if do_update:
+                # https://stackoverflow.com/a/18799497/6046713
+                sql = 'UPDATE videos AS v SET ' \
+                      'title=CASE WHEN v.title!=c.title THEN c.title ELSE v.title END, ' \
+                      'description=CASE WHEN v.description!=c.description THEN c.description ELSE v.description END, ' \
+                      'deleted=FALSE,' \
+                      'thumbnail=COALESCE(c.thumbnail, v.thumbnail), ' \
+                      'published_at=CASE WHEN c.published_at >= v.published_at THEN v.published_at ELSE c.published_at END ' \
+                      'FROM (VALUES %s) AS c(video_id, title, description, published_at, site, thumbnail) ' \
+                      'WHERE c.site=v.site AND c.video_id=v.video_id'
 
-        self.conn.commit()
+                values = tuple(
+                    (vid.video_id, vid.title, vid.description, vid.published_at, site, vid.thumbnail)
+                    for vid in do_update
+                )
 
-    def add_deleted_vids(self, videos, site):
+                with self.conn.cursor() as cursor:
+                    execute_values(cursor, sql, values, page_size=500)
+
+    def add_deleted_vids(self, videos: Iterable[BaseVideo], site: int | Site):
         """
         Sets the deleted flag on the videos provided and also sets the
         deletion time column if the deleted flag hasn't been set before
 
         Args:
-            videos (collections.Iterable of src.video.BaseVideo):
-                Iterable of :class:BaseVideo that are deleted
-            site (int):
+            videos:
+                Iterable of BaseVideo that are deleted
+            site:
                 id of the site being used
         """
         videos = set(videos)
         do_insert = videos - self.all_vid_ids[site]
         do_update = videos - do_insert
 
-        if do_insert:
-            t = datetime.utcnow()
-            sql = 'INSERT INTO videos (video_id, title, published_at, site, deleted, deleted_at) VALUES %s'
+        if not (do_insert or do_update):
+            return
 
-            values = ((vid.video_id, t, t) for vid in do_insert)
+        site = int(site)
+        with self.conn.transaction():
+            if do_insert:
+                t = datetime.utcnow()
+                sql = 'INSERT INTO videos (video_id, title, published_at, site, deleted, deleted_at) VALUES %s'
 
-            with self.conn.cursor() as cursor:
-                execute_values(cursor, sql, values, page_size=1000,
-                               template=f"(%s, 'Deleted video', %s, {site}, True, %s)")
+                values = tuple((vid.video_id, t, t) for vid in do_insert)
 
-        if do_update:
-            id_format = ','.join(['%s'] * len(do_update))
-            sql = 'UPDATE videos AS v SET ' \
-                  'deleted_at=CASE WHEN v.deleted=FALSE THEN CURRENT_TIMESTAMP ELSE v.deleted_at END, ' \
-                  'deleted=TRUE ' \
-                  'WHERE site=%s AND video_id IN (%s)' % (site, id_format)
+                with self.conn.cursor() as cursor:
+                    execute_values(cursor, sql, values, page_size=1000,
+                                   template=f"(%s, 'Deleted video', %s, {site}, True, %s)")
 
-            with self.conn.cursor() as cursor:
-                cursor.execute(sql, [(v.video_id,) for v in do_update])
+            if do_update:
+                sql = 'UPDATE videos AS v SET ' \
+                      'deleted_at=CASE WHEN v.deleted=FALSE THEN CURRENT_TIMESTAMP ELSE v.deleted_at END, ' \
+                      'deleted=TRUE ' \
+                      'WHERE site=%s AND video_id=ANY(%s)'
 
-        self.conn.commit()
+                with self.conn.cursor() as cursor:
+                    cursor.execute(sql, [site, [v.video_id for v in do_update]])
 
-    def add_vid_tags(self, videos, site, default_tags=None):
+    def add_vid_tags(self, videos: list[BaseVideo], site: int | Site, default_tags: list[str] = None):
         """
         Adds missing tags to the database based on the provided videos
 
         Args:
-            videos (list of src.video.BaseVideo):
+            videos:
                 List of videos from which the tags will be added
-            site (int):
+            site:
                 id of the site being used
-            default_tags (list of str):
+            default_tags:
                 An list of tag names to be applied to every video in the videos
                 param
         """
-
-        sql = 'INSERT INTO tags (tag) VALUES %s ON CONFLICT DO NOTHING RETURNING tag, id'
+        site = int(site)
         default_tags = [] if not default_tags else default_tags
         values = set(default_tags)
         cached_tags = set(self.all_tags.keys())
@@ -178,14 +223,20 @@ class PlaylistChecker:
         tobecached = values - cached_tags
 
         if tobecached:
-            with self.conn.cursor() as cursor:
-                results = execute_values(cursor, sql, [(x,) for x in tobecached],
-                                         page_size=1000, fetch=True)
+            sql = 'INSERT INTO tags (tag) VALUES %s ON CONFLICT DO NOTHING RETURNING tag, id'
+            try:
+                with self.class_cursor(models.Tag) as cursor:
+                    results: list[models.Tag] = execute_values(cursor, sql,
+                                                               [(x,) for x in tobecached],
+                                                               page_size=1000, fetch=True)
 
-            self.conn.commit()
+                self.conn.commit()
+            except Exception:
+                self.conn.rollback()
+                raise
 
             for tag in results:
-                self.all_tags[tag['tag']] = tag['id']
+                self.all_tags[tag.tag] = tag.id
 
         values = []
         for vid in videos:
@@ -212,81 +263,86 @@ class PlaylistChecker:
 
                 values.append((tag_id, video_id))
 
-        sql = 'INSERT INTO videoTags (tag_id, video_id) VALUES (%s, %s) ON CONFLICT DO NOTHING '
+        sql = 'INSERT INTO videoTags (tag_id, video_id) VALUES %s ON CONFLICT DO NOTHING '
 
-        with self.conn.cursor() as cursor:
-            execute_batch(cursor, sql, values, page_size=2000)
+        try:
+            with self.conn.cursor() as cursor:
+                execute_values(cursor, sql, values, page_size=2000)
 
-        self.conn.commit()
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
 
-    def add_channels(self, channels, site):
+    def add_channels(self, channels: Iterable[BaseChannel], site: int | Site):
         """
         Adds channels to db and updates old entries
         Columns updated are as follows:
             name and thumbnail aka profile pic
 
         Args:
-            channels (collections.Iterable of src.channel.BaseChannel):
+            channels: iterable of channels to add
+            site: id of the site
 
         """
+        site = int(site)
         channels = set(channels)
         do_insert = channels - self.db_channel_cache[site]
         do_update = channels - do_insert
 
-        if do_insert:
-            sql = 'INSERT INTO channels (channel_id, name, thumbnail, site) VALUES %s'
+        if not (do_insert or do_update):
+            return
 
-            with self.conn.cursor() as cursor:
-                execute_values(cursor, sql, [(c.channel_id, c.name, c.thumbnail, site) for c in do_insert], page_size=1000)
+        with self.conn.transaction():
+            if do_insert:
+                sql = 'INSERT INTO channels (channel_id, name, thumbnail, site) VALUES %s'
 
-            self.db_channel_cache[site].update([c.channel_id for c in do_insert])
+                with self.conn.cursor() as cursor:
+                    execute_values(cursor, sql, [(c.channel_id, c.name, c.thumbnail, site) for c in do_insert], page_size=1000)
 
-        if do_update:
-            sql = 'UPDATE channels AS c SET ' \
-                  'name=COALESCE(v.name, c.name), ' \
-                  'thumbnail=COALESCE(v.thumbnail, c.thumbnail) ' \
-                  'FROM (VALUES %s) AS v(channel_id, name, thumbnail) ' \
-                  'WHERE v.channel_id=c.channel_id'
+                self.db_channel_cache[site].update([c.channel_id for c in do_insert])
 
-            with self.conn.cursor() as cursor:
-                execute_values(cursor, sql, [(c.channel_id, c.name, c.thumbnail) for c in do_update], page_size=1000)
+            if do_update:
+                sql = 'UPDATE channels AS c SET ' \
+                      'name=COALESCE(v.name, c.name), ' \
+                      'thumbnail=COALESCE(v.thumbnail, c.thumbnail) ' \
+                      'FROM (VALUES %s) AS v(channel_id, name, thumbnail) ' \
+                      'WHERE v.channel_id=c.channel_id'
 
-        self.conn.commit()
+                with self.conn.cursor() as cursor:
+                    execute_values(cursor, sql, [(c.channel_id, c.name, c.thumbnail) for c in do_update], page_size=1000)
 
-    def add_channel_videos(self, videos, channels, site):
+    def add_channel_videos(self, videos: Iterable[BaseVideo], channels: Sequence[BaseChannel | str], site: int | Site):
         """
         Link video ids to channel ids in the channelVideos table
         This will handle adding missing channels for you. The videos need
         to have the channel property set to for this to work
 
         Args:
-            videos (collections.Iterable of src.video.BaseVideo):
+            videos:
                 List of :class:BaseVideo instances
-            channels(list of str or src.channel.BaseChannel):
-                Mixed list of :class:BaseChannelinstances and
-                channel_ids as str
-            site (int):
+            channels:
+                List of BaseChannel instances and channel_ids as str
+            site:
                 id of the site being used
         """
+        site = int(site)
         self.add_channels([c for c in channels if not isinstance(c, str)], site)
-        format_channels = ','.join(['%s'] * len(channels))
-        sql = 'SELECT id, channel_id FROM channels WHERE channel_id IN (%s)' % format_channels
+        sql = 'SELECT id, channel_id FROM channels WHERE channel_id=ANY(%s)'
 
         channel_ids = {}
-        with self.conn.cursor() as cursor:
-            cursor.execute(sql, [(c,) if isinstance(c, str) else (c.channel_id,) for c in channels])
+        with self.class_cursor(models.Channel) as cursor:
+            cursor.execute(sql, [[c if isinstance(c, str) else c.channel_id for c in channels]])
 
             for row in cursor:
-                channel_ids[row['channel_id']] = row['id']
-
-        sql = 'INSERT INTO channelVideos (channel_id, video_id) VALUES (%s, %s) ON CONFLICT DO NOTHING'
+                channel_ids[row.channel_id] = row.id
 
         data = []
 
         for vid in videos:
             channel_id = channel_ids.get(vid.channel_id)
             if not channel_id:
-                logger.info(f'Channel not found for video {vid}')
+                logger.warning(f'Channel not found for video {vid}')
                 continue
 
             vid_id = self.all_vids[site].get(vid.video_id)
@@ -295,119 +351,163 @@ class PlaylistChecker:
 
             data.append((channel_id, vid_id))
 
-        with self.conn.cursor() as cursor:
-            execute_batch(cursor, sql, data, page_size=1500)
+        try:
+            sql = 'INSERT INTO channelVideos (channel_id, video_id) VALUES %s ON CONFLICT DO NOTHING'
+            with self.conn.cursor() as cursor:
+                execute_values(cursor, sql, data, page_size=2000)
 
-        self.conn.commit()
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
 
-    def add_playlist_vids(self, playlist_id, video_ids):
+    def add_playlist_vids(self, playlist_id: int, video_ids: Iterable[int]):
         """
         Add video playlist connection to the playlistVideos table
 
         Args:
-            playlist_id (int):
+            playlist_id:
                 The database id for the playlist
-            video_ids (collections.Iterable of int):
+            video_ids:
                 An iterable of database ids for videos that are added the
                 specified playlist
         """
         sql = 'INSERT INTO playlistVideos (playlist_id, video_id) VALUES ' \
               '%s ON CONFLICT DO NOTHING'
 
-        values = ((playlist_id, video_id) for video_id in video_ids)
+        values = tuple((playlist_id, video_id) for video_id in video_ids)
 
-        with self.conn.cursor() as cursor:
-            execute_values(cursor, sql, values, page_size=2000)
+        try:
+            with self.conn.cursor() as cursor:
+                execute_values(cursor, sql, values, page_size=2000)
 
-        self.conn.commit()
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
 
-    def get_vid_ids(self, vid_ids, site):
+    def update_removed_playlist_videos(self, playlist_id: int, video_ids: list[int]):
+        """
+        Removes playlist videos that are not found in the video_ids iterable.
+        """
+        sql = 'DELETE FROM playlistvideos WHERE playlist_id=%s AND NOT video_id=ANY(%s)'
+
+        try:
+            with self.conn.cursor() as cursor:
+                cursor.execute(sql, [playlist_id, video_ids])
+                logger.info(f'user removed {cursor.rowcount} videos from playlist {playlist_id}')
+
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
+    def get_vid_ids(self, vid_ids: list[str], site: int | Site) -> dict[str, int]:
         """
         Gets the database ids to the corresponding video ids
 
         Args:
-            vid_ids (list of str):
-                list of video ids of the specified site
-            site (site):
-                Id of the site being used
+            vid_ids:
+                list of video ids of the specified site.
+            site:
+                ID of the site being used
 
         Returns:
             dict: a dictionary of type {str: int} aka {video_id: database_id}
         """
-        format_ids = ','.join(['%s'] * len(vid_ids))
-        sql = f'SELECT id, video_id FROM videos WHERE site={site} AND video_id IN (%s)' % format_ids
+        site = int(site)
+        sql = f'SELECT id, video_id, site FROM videos WHERE site={site} AND video_id=ANY(%s)'
 
-        with self.conn.cursor() as cursor:
-            cursor.execute(sql, [(v,) for v in vid_ids])
-            vid_ids = {vid['video_id']: vid['id'] for vid in cursor}
+        with self.class_cursor(models.PartialVideo) as cursor:
+            cursor.execute(sql, [vid_ids])
+            vid_ids = {vid.video_id: vid.id for vid in cursor}
 
         self.all_vids[site].update(vid_ids)
         self.all_vid_ids[site].update(vid_ids.keys())
         return vid_ids
 
-    def add_playlist(self, playlist_id, name, site):
+    def add_playlist(self, playlist_id: str, name: str, site: int | Site) -> int:
         """
         Adds a playlist to the database if it doesn't exist
 
         Args:
-            playlist_id (str):
+            playlist_id:
                 id of the playlist
-            name (str):
+            name:
                 name of the playlist
-            site (int):
-                Id of the site being used
+            site:
+                ID of the site being used
 
         Returns:
             int: The database id of the newly made playlist
 
         """
+        site = int(site)
         sql = 'INSERT INTO playlists (playlist_id, name, site) VALUES (%s, %s, %s) RETURNING id'
 
-        with self.conn.cursor() as cursor:
-            cursor.execute(sql, (playlist_id, name, site))
-            playlist_id = cursor.fetchone()[0]
+        try:
+            with self.conn.cursor() as cursor:
+                cursor.execute(sql, (playlist_id, name, int(site)))
+                playlist_id = cursor.fetchone()[0]
 
-        self.conn.commit()
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
 
         return playlist_id
 
-    def get_playlist_video_ids(self, playlist_id: int):
+    def get_playlist_video_ids(self, playlist_id: int) -> list[models.PlaylistVideo]:
         """
         Gets all video ids that are associated with this playlist
         Args:
-            playlist_id (int):
-
+            playlist_id: id of the playlist
         Returns:
             list:
-                A list of dicts with the "video_id" as key and the
-                actual id as value (int)
+                A list PlaylistVideo objects with the video_id property set
         """
-        sql = 'SELECT video_id FROM playlistVideos WHERE playlist_id=%s' % playlist_id
+        sql = 'SELECT video_id FROM playlistVideos WHERE playlist_id=%s'
 
-        with self.conn.cursor() as cursor:
-            cursor.execute(sql)
+        with self.class_cursor(models.PlaylistVideo) as cursor:
+            cursor.execute(sql, (playlist_id,))
             return cursor.fetchall()
 
-    def iter_videos_to_download(self):
-        sql = 'SELECT site, id, video_id, downloaded_format, download_filename, download_type ' \
-              'FROM videos ' \
-              'WHERE download_type IS NOT NULL AND deleted=FALSE'
+    def iter_videos_to_download(self, playlist_ids: list[int] = None) -> Generator[models.Video, None, None]:
+        where = '((download=TRUE or force_redownload=TRUE) AND deleted=FALSE)'
+        join = ''
+        args = ()
 
-        with self.conn.cursor() as cursor:
-            cursor.execute(sql)
+        if playlist_ids:
+            where = 'pv.playlist_id=ANY(%s) AND ' + where
+            join = 'INNER JOIN playlistvideos pv ON v.id = pv.video_id'
+            args = [playlist_ids]
+
+        sql = f'''
+        SELECT site, id, v.video_id, downloaded_format, downloaded_filename, download_format, force_redownload
+        FROM videos v
+        {join}
+        WHERE {where}
+        '''
+
+        with self.class_cursor(models.Video) as cursor:
+            cursor.execute(sql, args)
             for row in cursor:
                 yield row
 
-    def update_vid_filename(self, filename, download_format, video_id):
-        sql = 'UPDATE videos SET download_filename=%s, downloaded_format=%s WHERE id=%s'
+    def update_vid_filename(self, filename: Optional[str], downloaded_format: Optional[str], video_id: int):
+        sql = 'UPDATE videos SET downloaded_filename=%s, downloaded_format=%s, force_redownload=FALSE WHERE id=%s'
 
-        with self.conn.cursor() as cursor:
-            cursor.execute(sql, (filename, download_format, video_id))
+        try:
+            with self.conn.cursor() as cursor:
+                cursor.execute(sql, (filename, downloaded_format, video_id))
 
-        self.conn.commit()
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
 
     @staticmethod
-    def run_after(fields: Dict, optional_fields: Dict, cmds: List[Script]):
+    def run_after(fields: dict, optional_fields: dict, cmds: List[Script]):
         """
         Runs all specified commands and inputs data encoded in utf-8 to stdin
         """
@@ -446,16 +546,16 @@ class PlaylistChecker:
                 if err:
                     logger.error(err)
 
-    def get_new_deleted(self, deleted, site):
+    def get_new_deleted(self, deleted: list[BaseVideo], site: int | Site) -> set[BaseVideo]:
         """
         Gets the newly deleted videos from the specified site with
         updated titles
 
         Args:
-            deleted (list of src.video.BaseVideo):
-                List of all deleted vids from a site
-            site (int):
-                Id if the site currently in use
+            deleted:
+                List of all deleted vids from a site.
+            site:
+                id if the site currently in use
 
         Returns:
             set: A set of BaseVideo objects with updated titles
@@ -463,16 +563,16 @@ class PlaylistChecker:
         if not deleted:
             return set()
 
-        deleted_format = ','.join(['%s']*len(deleted))
-        sql = f'SELECT title, video_id FROM videos WHERE deleted IS FALSE AND site={site}' \
-               ' AND video_id IN (%s)' % deleted_format
+        site = int(site)
+        sql = f'SELECT id, title, video_id FROM videos WHERE deleted IS FALSE AND site=%s' \
+               ' AND video_id=ANY(%s)'
 
         new_deleted = set()
-        with self.conn.cursor() as cursor:
-            cursor.execute(sql, [(vid.video_id,) for vid in deleted])
+        with self.class_cursor(models.Video) as cursor:
+            cursor.execute(sql, [site, [vid.video_id for vid in deleted]])
 
-            for row in cursor:
-                video_id = row['video_id']
+            for video_partial in cursor:
+                video_id = video_partial.video_id
                 video = None
                 for vid in deleted:
                     if vid.video_id == video_id:
@@ -482,20 +582,20 @@ class PlaylistChecker:
                 if not video:
                     continue
 
-                video.title = row['title']
+                video.title = video_partial.title
                 new_deleted.add(video)
 
         return new_deleted
 
-    def get_deleted_info(self, deleted, site):
+    def get_deleted_info(self, deleted: list[BaseVideoT], site: int | Site) -> list[BaseVideoT]:
         """
         Updates BaseVideo objects with cached info from database
         Namely updates title, channel name and channel id
 
         Args:
-            deleted (list of src.video.BaseVideo):
+            deleted:
                  List of the videos to be updated
-            site (int):
+            site:
                 Id of the site used
 
         Returns:
@@ -503,15 +603,15 @@ class PlaylistChecker:
 
         """
         if not deleted:
-            return ()
+            return deleted
 
-        deleted_format = ','.join(['%s']*len(deleted))
+        site = int(site)
         sql = 'SELECT v.video_id, v.title, c.name, c.channel_id FROM videos v INNER JOIN channelVideos cv ' \
               'ON cv.video_id=v.id INNER JOIN channels c ON cv.channel_id = c.id ' \
-             f'WHERE v.site={site} AND v.video_id IN (%s)' % deleted_format
+             f'WHERE v.site=%s AND v.video_id=ANY(%s)'
 
         with self.conn.cursor() as cursor:
-            cursor.execute(sql, [(vid.video_id,) for vid in deleted])
+            cursor.execute(sql, [site, [vid.video_id for vid in deleted]])
 
             for row in cursor:
                 video_id = row['video_id']
@@ -530,7 +630,8 @@ class PlaylistChecker:
 
         return deleted
 
-    def check_all(self, whitelist=None):
+    @with_connection
+    def check_all(self, whitelist: list[str] = None):
         """
         Main function of this class that runs the whole thing and
         does all the stuff to make everything work as intended
@@ -541,32 +642,37 @@ class PlaylistChecker:
                 specific playlists
         """
         logger.info('Starting check')
-        with self.conn.cursor() as cursor:
+        with self.class_cursor(models.Playlist) as cur:
             sql = 'SELECT * FROM playlists'
-            cursor.execute(sql)
-            _playlists = {data['playlist_id']: data for data in cursor.fetchall()}
+            cur.execute(sql)
+            _playlists: dict[str, models.Playlist] = {data.playlist_id: data for data in cur}
 
+        with self.class_cursor(models.PartialVideo) as cur:
             sql = 'SELECT id, video_id, site FROM videos'
-            cursor.execute(sql)
+            cur.execute(sql)
 
-            for vid in cursor:
-                self.all_vids[vid['site']][vid['video_id']] = vid['id']
-                self.all_vid_ids[vid['site']].add(vid['video_id'])
+            for vid in cur:
+                self.all_vids[vid.site][vid.video_id] = vid.id
+                self.all_vid_ids[vid.site].add(vid.video_id)
 
+        with self.class_cursor(models.Tag) as cur:
             # Put all existing tags to cache
             sql = 'SELECT * FROM tags'
-            cursor.execute(sql)
-            for tag in cursor:
-                self.all_tags[tag['tag']] = tag['id']
+            cur.execute(sql)
+            for tag in cur:
+                self.all_tags[tag.tag] = tag.id
 
+        with self.class_cursor(models.Channel) as cur:
             # Put all inserted channel ids to cache
-            sql = 'SELECT site, channel_id FROM channels'
-            cursor.execute(sql)
-            for channel in cursor:
-                self.db_channel_cache[channel['site']].add(channel['channel_id'])
+            sql = 'SELECT id, site, channel_id, name FROM channels'
+            cur.execute(sql)
+            for channel in cur:
+                self.db_channel_cache[channel.site].add(channel.channel_id)
 
         playlists = self.config.playlists
         logger.info(f'Checking a total of {len(playlists)} playlists')
+        checked_playlists: set[int] = set()
+
         for idx, playlist in enumerate(playlists):
             playlist_id = playlist.playlist_id
 
@@ -576,27 +682,28 @@ class PlaylistChecker:
 
             logger.info(f'Processing {idx+1}/{len(playlists)} {playlist.name}')
 
-            playlist_data = _playlists.get(playlist_id, {})
+            playlist_row = _playlists.get(playlist_id, None)
             site = playlist.site
             logger.info(f'Checking playlist {playlist_id} on site {site}')
 
             # Create playlist by site
             if site == Site.Youtube:
                 playlist_checker = YTPlaylist(self.conn, self.yt_api, playlist_id)
-                if not playlist_data:
+                if not playlist_row:
                     logger.info('New playlist getting playlist info')
                     info = playlist_checker.get_playlist_info()
                     if not info:
                         continue
 
-                    playlist_data['id'] = self.add_playlist(playlist_id, info['snippet']['title'], site)
-                    playlist_data['name'] = info['snippet']['title']
+                    playlist_row.id = self.add_playlist(playlist_id, info['snippet']['title'], site)
+                    playlist_row.name = info['snippet']['title']
             else:
+                logger.warning(f'{site} not implemented')
                 continue
 
             # Get videos
             logger.debug('getting old ids')
-            old = self.get_playlist_video_ids(playlist_data['id'])
+            old = self.get_playlist_video_ids(playlist_row.id)
             logger.debug('Getting items from youtube')
 
             try:
@@ -620,14 +727,21 @@ class PlaylistChecker:
             self.add_and_update_vids(items, site)
 
             # Put all vids in the playlist to a single list
-            # in order get the db ids so we can update
+            # in order get the db ids, so we can update
             # the playlistVideos table correctly
             playlist_items = [item.video_id for item in items]
             playlist_items.extend([vid.video_id for vid in deleted])
             playlist_items.extend([vid.video_id for vid in already_checked])
 
             vid_ids = self.get_vid_ids(playlist_items, site)
-            self.add_playlist_vids(playlist_data['id'], vid_ids.values())
+
+            # Delete removed items from playlist
+            self.update_removed_playlist_videos(playlist_row.id, list(vid_ids.values()))
+            self.add_playlist_vids(playlist_row.id, vid_ids.values())
+
+            # Update download cols
+            self.update_archived_playlist_videos(playlist_row.id)
+
             if deleted:
                 self.add_deleted_vids(deleted, site)
 
@@ -654,6 +768,8 @@ class PlaylistChecker:
                 # Add channels and channel videos
                 self.add_channel_videos(items, channels, site)
 
+            checked_playlists.add(playlist_row.id)
+
             # After processing of data by external scripts
             after = playlist.after or []
             after.extend(self.config.after or [])  # Default after command
@@ -662,7 +778,7 @@ class PlaylistChecker:
                 logger.debug('No scripts to run after checking')
 
             if after:
-                old = [d['video_id'] for d in old]
+                old = [d.video_id for d in old]
                 new = items - {k for k, v in self.all_vids[site].items() if
                                v in old}
 
@@ -677,7 +793,7 @@ class PlaylistChecker:
                     'channel_format': playlist_checker.channel_url_format,
                     'playlist_format': playlist_checker.playlist_url_format,
                     'playlist_id': playlist_id,
-                    'playlist_name': playlist_data.get('name', playlist.name)
+                    'playlist_name': playlist_row.name or playlist.name
                 }
                 optional_fields = {
                     'deleted': [vid.to_dict() for vid in deleted],
@@ -699,18 +815,18 @@ class PlaylistChecker:
         logger.info('Downloading videos')
 
         downloads = 0
-        for row in self.iter_videos_to_download():
-            if downloads >= self.config.max_downloads_per_run:
+        for row in self.iter_videos_to_download(playlist_ids=list(checked_playlists)):
+            if 0 < self.config.max_downloads_per_run <= downloads:
                 break
 
-            site = row['site']
-            filename = video_downloader.download_video(SITE_CLASSES[site](row['video_id']),
+            site = row.site
+            info = video_downloader.download_video(SITE_CLASSES[site](row.video_id),
                                                        row,
-                                                       {'format': row['download_type']},
+                                                       {},
                                                        self.config.download_sleep_interval)
 
-            if filename:
-                self.update_vid_filename(filename, row['download_type'], row['id'])
+            if info and info.success:
+                self.update_vid_filename(info.filename, info.downloaded_format, row.id)
                 downloads += 1
 
         logger.info('Videos downloaded')

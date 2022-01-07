@@ -23,6 +23,7 @@ class Playlist(BaseModel):
     playlist_id: str
     site: Site
     after: Optional[List[Script]]
+    archive: bool = False
 
 
 class Config(BaseModel):

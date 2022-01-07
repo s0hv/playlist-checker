@@ -23,5 +23,6 @@ playlists:
   - name: "test"
     playlist_id: "id"
     site: *YouTube
+    archive: true # false by default
     after:
       - *test_script

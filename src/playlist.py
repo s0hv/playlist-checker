@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
+from typing import Optional
+
 from src.api import YTApi, Part
-from src.video import YTVideo
 from src.channel import YTChannel
+from src.video import YTVideo
 
 
 class BasePlaylist(ABC):
@@ -41,7 +43,7 @@ class BasePlaylist(ABC):
 
 
 class YTPlaylist(BasePlaylist):
-    def __init__(self, db, api: YTApi, playlist_id, **options):
+    def __init__(self, db, api: YTApi, playlist_id: str, **options):
         super().__init__(db, **options)
         self.playlist_id = playlist_id
         self._api = api
@@ -63,7 +65,7 @@ class YTPlaylist(BasePlaylist):
         return 'https://www.youtube.com/playlist?list=%s'
 
     @staticmethod
-    def vids2set(videos):
+    def vids2set(videos) -> set[YTVideo]:
         video_set = {YTVideo(video['id'], **video) for video in videos}
         return video_set
 
@@ -75,7 +77,13 @@ class YTPlaylist(BasePlaylist):
     def get_playlist_info(self):
         return self.api.playlist_info(self.playlist_id, Part.Snippet)
 
-    def get_videos(self, already_checked: dict):
+    def get_videos(self, already_checked: dict) -> Optional[tuple[set[YTVideo], set[YTVideo], set[YTVideo]]]:
+        """
+        Finds new unchecked, deleted and already checked videos in the playlist.
+        Checks deleted videos by getting all items in the playlist first (this will return all video ids even of the deleted videos)
+        and then getting the video details for all videos.
+        Deleted videos are the videos that are not included in the latter query.
+        """
         js = self.api.playlist_items(self.playlist_id, Part.combine(Part.ID, Part.ContentDetails))
         if js is None:
             return
@@ -101,14 +109,14 @@ class YTPlaylist(BasePlaylist):
 
         return items, deleted, checked_items
 
-    def get_deleted(self, new: set, old: set, checked_vids: set):
+    def get_deleted(self, new: set[YTVideo], old: set[YTVideo], checked_vids: set[YTVideo]) -> set[YTVideo]:
         deleted = old - new - checked_vids
         for vid in deleted:
             vid.data = {'snippet': {}}
 
         return deleted
 
-    def get_channels(self, channel_ids):
+    def get_channels(self, channel_ids) -> Optional[list[YTChannel]]:
         js = self.api.channel_info(list(channel_ids), Part.Snippet)
         if not js:
             return

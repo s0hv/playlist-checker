@@ -1,6 +1,6 @@
 google-api-python-client==2.33.0
 filelock==3.4.2
-psycopg2==2.9.3
+psycopg[c]~=3.0.7
 pyyaml~=6.0
 pydantic==1.9.0
 python-dotenv~=0.19.2

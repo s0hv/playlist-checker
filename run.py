@@ -11,10 +11,10 @@ load_dotenv()
 
 from src.app import PlaylistChecker
 
-dir_path = os.path.dirname(os.path.realpath(__file__))
+logs_dir = os.getenv('LOGS_DIR', os.path.dirname(os.path.realpath(__file__)))
 logger = logging.getLogger('debug')
 logger.setLevel(logging.DEBUG)
-handler = logging.FileHandler(filename=os.path.join(dir_path, 'debug.log'), encoding='utf-8', mode='a')
+handler = logging.FileHandler(filename=os.path.join(logs_dir, 'debug.log'), encoding='utf-8', mode='a')
 handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:[%(module)s] %(message)s'))
 logger.addHandler(handler)
 

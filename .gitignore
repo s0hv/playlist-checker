@@ -110,8 +110,9 @@ config.yaml
 test.*
 error.json
 .run
-
 db/schema.sql
+yt_dlp_options.json
+
 # Video data
 data/
 

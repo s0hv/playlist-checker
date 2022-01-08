@@ -3,6 +3,9 @@ import logging
 import os
 import sys
 
+dir_path = os.path.dirname(os.path.realpath(__file__))
+os.chdir(dir_path)
+
 import filelock
 from dotenv import load_dotenv
 from filelock import Timeout
@@ -11,7 +14,6 @@ load_dotenv()
 
 from src.app import PlaylistChecker
 
-dir_path = os.path.dirname(os.path.realpath(__file__))
 logs_dir = os.getenv('LOGS_DIR', dir_path)
 logger = logging.getLogger('debug')
 logger.setLevel(logging.DEBUG)

@@ -483,7 +483,7 @@ class PlaylistChecker:
             args = [playlist_ids]
 
         sql = f'''
-        SELECT site, id, v.video_id, downloaded_format, downloaded_filename, download_format, force_redownload
+        SELECT DISTINCT ON (id) id, site, v.video_id, downloaded_format, downloaded_filename, download_format, force_redownload
         FROM videos v
         {join}
         WHERE {where}
@@ -817,17 +817,23 @@ class PlaylistChecker:
 
         downloads = 0
         for row in self.iter_videos_to_download(playlist_ids=list(checked_playlists)):
-            if 0 < self.config.max_downloads_per_run <= downloads:
+            if 0 <= self.config.max_downloads_per_run <= downloads:
                 break
 
+            if not row.force_redownload and row.downloaded:
+                continue
+
+            logger.info(f'Downloading video {downloads+1} of max {self.config.max_downloads_per_run}')
             site = row.site
             info = video_downloader.download_video(SITE_CLASSES[site](row.video_id),
-                                                       row,
-                                                       {},
-                                                       self.config.download_sleep_interval)
+                                                   row,
+                                                   {},
+                                                   self.config.download_sleep_interval)
 
-            if info and info.success:
+            if info.success:
                 self.update_vid_filename(info.filename, info.downloaded_format, row.id)
+                downloads += 1
+            else:
                 downloads += 1
 
         logger.info('Videos downloaded')

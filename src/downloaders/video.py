@@ -3,7 +3,6 @@ import os
 import time
 from dataclasses import dataclass
 from random import uniform
-from typing import Optional
 
 import yt_dlp
 
@@ -74,7 +73,7 @@ class DownloadInfo:
         return cls('', '', False)
 
 
-def download_video(video, row: models.Video, opts, sleep: MinMax = SLEEP) -> Optional[DownloadInfo]:
+def download_video(video, row: models.Video, opts, sleep: MinMax = SLEEP) -> DownloadInfo:
     """
 
     Args:
@@ -90,8 +89,6 @@ def download_video(video, row: models.Video, opts, sleep: MinMax = SLEEP) -> Opt
 
     if row.force_redownload:
         opts['overwrite'] = True
-    elif row.downloaded_format:
-        return
 
     # Override default format
     if row.download_format:
@@ -109,6 +106,7 @@ def download_video(video, row: models.Video, opts, sleep: MinMax = SLEEP) -> Opt
 
     except:
         logger.exception('Failed to dl vid')
+        time.sleep(uniform(sleep.min, sleep.max))
         return DownloadInfo.failed()
 
     time.sleep(uniform(sleep.min, sleep.max))

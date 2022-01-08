@@ -48,7 +48,7 @@ def bulk_download_thumbnails(videos, site: Site):
     CHUNK_SIZE = SITE_OPTIONS[site]['CHUNK_SIZE']
     SLEEP = SITE_OPTIONS[site]['SLEEP']
 
-    path = os.path.join('data', str(site))
+    path = os.path.join('data', str(int(site)))
     os.makedirs(path, exist_ok=True)
 
     i = 0

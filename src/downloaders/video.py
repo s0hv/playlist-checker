@@ -1,6 +1,7 @@
 import io
 import logging
 import os
+import re
 import subprocess
 import time
 from dataclasses import dataclass
@@ -27,10 +28,11 @@ class DownloadInfo:
     thumbnail_path: str = None
     info_path: str = None
     subtitle_paths: list[str] = None
+    blocked: bool = False
 
     @classmethod
-    def failed(cls):
-        return cls('', '', False)
+    def failed(cls, blocked=False):
+        return cls('', '', False, blocked=blocked)
 
 
 class Srv3SubtitlesConvertorAss(yt_dlp.FFmpegSubtitlesConvertorPP):
@@ -252,6 +254,16 @@ def download_video(video, row: models.Video, opts, sleep: MinMax = SLEEP) -> Dow
             dl_info.success = True
             dl_info.downloaded_format = downloaded_format
             dl_info.info_path = ytdl.prepare_filename(info, 'infojson')
+    except yt_dlp.DownloadError as e:
+        time.sleep(uniform(sleep.min, sleep.max))
+
+        blocked = re.search(r'blocked in your|copyright grounds', e.msg, re.I) is not None
+        if blocked:
+            logger.warning(f'Video was blocked  in your country. {e.msg}')
+        else:
+            logger.exception('Failed to dl vid')
+
+        return DownloadInfo.failed(blocked=blocked)
     except:
         logger.exception('Failed to dl vid')
         time.sleep(uniform(sleep.min, sleep.max))

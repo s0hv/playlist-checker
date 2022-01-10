@@ -519,7 +519,13 @@ class PlaylistChecker:
                 yield row
 
     def update_vid_filename(self, filename: Optional[str], downloaded_format: Optional[str], video_id: int):
-        sql = 'UPDATE videos SET downloaded_filename=%s, downloaded_format=%s, force_redownload=FALSE WHERE id=%s'
+        sql = '''
+        UPDATE videos SET 
+            downloaded_filename=COALESCE(%s, downloaded_filename), 
+            downloaded_format=COALESCE(%s, downloaded_format), 
+            force_redownload=FALSE
+        WHERE id=%s
+        '''
 
         try:
             with self.conn.cursor() as cursor:
@@ -959,6 +965,8 @@ class PlaylistChecker:
 
             else:
                 downloads += 1
+                if info.blocked:
+                    self.update_vid_filename(None, None if row.downloaded_format else 'Video Blocked', row.id)
 
         self.conn.commit()
         logger.info('Videos downloaded')

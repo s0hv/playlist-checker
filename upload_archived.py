@@ -183,7 +183,13 @@ if __name__ == '__main__':
 
             info_file = checker.upload_and_delete_file(d.get(S3ObjectType.metadata), base_tags, S3ObjectType.metadata)
             thumbnail_file = checker.upload_and_delete_file(d.get(S3ObjectType.thumbnail), base_tags, S3ObjectType.thumbnail)
-            audio_file = checker.upload_and_delete_file(d.get(S3ObjectType.audio), base_tags, S3ObjectType.audio)
+
+            # If video and audio are the same file the file has already been deleted.
+            # just use the normal uploaded filename
+            if video_file and video_file == d.get(S3ObjectType.audio):
+                audio_file = video_file
+            else:
+                audio_file = checker.upload_and_delete_file(d.get(S3ObjectType.audio), base_tags, S3ObjectType.audio)
 
             subs = []
             if subtitle_paths := d.get(S3ObjectType.subtitle):

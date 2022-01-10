@@ -7,7 +7,7 @@ from .DbBase import DbBase
 
 @dataclass(eq=False)
 class PartialVideo(DbBase):
-    video_id: int
+    video_id: str
     site: Optional[int] = None
 
     def __eq__(self, other):
@@ -35,3 +35,11 @@ class Video(PartialVideo):
     @property
     def downloaded(self) -> bool:
         return self.downloaded_format is not None
+
+
+@dataclass
+class VideoExtraFiles:
+    video_id: int
+    thumbnail: Optional[str] = None
+    info_json: Optional[str] = None
+    other_files: Optional[dict[str, str]] = None

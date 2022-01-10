@@ -1,16 +1,18 @@
 import os
 import time
+from typing import Iterable
 
 import requests
 
 from src.enum import Site
+from src.video import BaseVideo
 
 SITE_OPTIONS = {
     0: {'CHUNK_SIZE': 5, 'SLEEP': 2}
 }
 
 
-def download_thumbnail(video, site: Site):
+def download_thumbnail(video: BaseVideo, site: Site):
     """
     Downloads a thumbnail of the vid if it doesn't exist
     Args:
@@ -29,6 +31,7 @@ def download_thumbnail(video, site: Site):
     path = os.path.join('data', str(site.value), video.video_id + '.jpg')
 
     if os.path.exists(path):
+        video.thumbnail_path = path
         return None
 
     with open(path, 'wb') as f:
@@ -43,12 +46,14 @@ def download_thumbnail(video, site: Site):
 
             f.write(chunk)
 
+    video.thumbnail_path = path
 
-def bulk_download_thumbnails(videos, site: Site):
+
+def bulk_download_thumbnails(videos: Iterable[BaseVideo], site: Site):
     CHUNK_SIZE = SITE_OPTIONS[site]['CHUNK_SIZE']
     SLEEP = SITE_OPTIONS[site]['SLEEP']
 
-    path = os.path.join('data', str(int(site)))
+    path = os.path.join('data', str(site.value))
     os.makedirs(path, exist_ok=True)
 
     i = 0

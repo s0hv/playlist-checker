@@ -8,4 +8,12 @@ class ScriptDataField(Enum):
 
 
 class Site(IntEnum):
-    Youtube = 0
+    YouTube = 0
+
+
+class S3ObjectType(Enum):
+    video = 'video'
+    thumbnail = 'thumbnail'
+    subtitle = 'subtitle'
+    metadata = 'metadata'
+    other = 'other'

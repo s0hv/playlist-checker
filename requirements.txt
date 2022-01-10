@@ -1,3 +1,4 @@
+boto3[crt]==1.20.31
 google-api-python-client==2.33.0
 filelock==3.4.2
 psycopg[c]~=3.0.7

@@ -1,6 +1,7 @@
 import re
 from abc import ABC, abstractmethod
 from datetime import datetime
+from typing import Optional
 
 from src.enum import Site
 from src.utils import get_yt_thumb
@@ -14,6 +15,7 @@ class BaseVideo(ABC):
     def __init__(self, video_id, data):
         self.video_id = video_id
         self.data = data
+        self._thumbnail_path: Optional[str] = None
 
     @property
     @abstractmethod
@@ -72,6 +74,14 @@ class BaseVideo(ABC):
     def published_at(self):
         raise NotImplementedError
 
+    @property
+    def thumbnail_path(self):
+        return self._thumbnail_path
+
+    @thumbnail_path.setter
+    def thumbnail_path(self, val: str):
+        self._thumbnail_path = val
+
     def to_dict(self):
         raise NotImplementedError
 
@@ -89,7 +99,7 @@ class BaseVideo(ABC):
 
 
 class YTVideo(BaseVideo):
-    SITE = Site.Youtube
+    SITE = Site.YouTube
 
     def __init__(self, video_id, **data):
         super().__init__(video_id, data)
@@ -165,5 +175,5 @@ class YTVideo(BaseVideo):
 
 
 SITE_CLASSES = {
-    Site.Youtube: YTVideo
+    Site.YouTube: YTVideo
 }

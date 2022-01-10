@@ -7,6 +7,11 @@ max_downloads_per_run: 50
 sites:
   - &YouTube 0
 
+s3_archive: false
+s3_bucket: ""
+delete_old_info: true
+delete_old_thumbnail: true
+
 scripts:
   - &test_script
     name: "Test"

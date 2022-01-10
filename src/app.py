@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import shlex
 import subprocess
 import threading
@@ -11,6 +12,7 @@ from typing import List, TypeVar, Sequence, Optional, Type, Generator
 import psycopg
 from psycopg import Cursor
 from psycopg.rows import class_row, dict_row
+from psycopg.types.json import Json
 
 from src.api import YTApi, HttpError
 from src.channel import BaseChannel
@@ -18,8 +20,9 @@ from src.config import Config, Script
 from src.db import models
 from src.db.utils import execute_values
 from src.downloaders import thumbnail, video as video_downloader
-from src.enum import Site
+from src.enum import Site, S3ObjectType
 from src.playlist import YTPlaylist
+from src.utils import generate_extra_files, get_filename
 from src.video import SITE_CLASSES, BaseVideo
 
 logger = logging.getLogger('debug')
@@ -187,7 +190,7 @@ class PlaylistChecker:
                 with self.conn.cursor() as cursor:
                     cursor.execute(sql, [site, [v.video_id for v in do_update]])
 
-    def add_vid_tags(self, videos: list[BaseVideo], site: int | Site, default_tags: list[str] = None):
+    def add_vid_tags(self, videos: set[BaseVideo], site: int | Site, default_tags: list[str] = None):
         """
         Adds missing tags to the database based on the provided videos
 
@@ -472,6 +475,27 @@ class PlaylistChecker:
             cursor.execute(sql, (playlist_id,))
             return cursor.fetchall()
 
+    def get_extra_files(self, video_id: int) -> Optional[models.VideoExtraFiles]:
+        sql = 'SELECT * FROM extra_video_files WHERE video_id=%s'
+        with self.class_cursor(models.VideoExtraFiles) as cur:
+            cur.execute(sql, (video_id,))
+            return cur.fetchone()
+
+    def get_thumbnails_to_dl(self, site: int) -> list[models.PartialVideo]:
+        """
+        Finds videos without thumbnail set in extra files
+        """
+        sql = '''
+        SELECT v.video_id, v.id FROM videos v
+        LEFT JOIN extra_video_files evf ON v.id = evf.video_id
+        WHERE v.site=%s AND v.deleted=FALSE AND evf.thumbnail IS NULL AND 
+            (v.download=FALSE OR (v.force_redownload=FALSE AND v.downloaded_format IS NOT NULL))
+        '''
+
+        with self.class_cursor(models.PartialVideo) as cur:
+            cur.execute(sql, (site,))
+            return cur.fetchall()
+
     def iter_videos_to_download(self, playlist_ids: list[int] = None) -> Generator[models.Video, None, None]:
         where = '((download=TRUE or force_redownload=TRUE) AND deleted=FALSE)'
         join = ''
@@ -505,6 +529,26 @@ class PlaylistChecker:
         except Exception:
             self.conn.rollback()
             raise
+
+    def update_filename(self, filename: str, video_id: int):
+        with self.conn.transaction():
+            with self.conn.cursor() as cur:
+                cur.execute('UPDATE videos SET downloaded_filename=%s WHERE id=%s', (filename, video_id))
+
+    def update_extra_files(self, model: models.VideoExtraFiles):
+        sql = '''
+        INSERT INTO extra_video_files as e (video_id, thumbnail, info_json, other_files) 
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (video_id) DO UPDATE 
+        SET thumbnail=COALESCE(EXCLUDED.thumbnail, e.thumbnail), 
+            info_json=COALESCE(EXCLUDED.info_json, e.info_json), 
+            other_files=COALESCE(EXCLUDED.other_files, e.other_files)
+        '''
+
+        with self.conn.transaction():
+            with self.conn.cursor() as cur:
+                other_files = Json(model.other_files) if model.other_files else None
+                cur.execute(sql, (model.video_id, model.thumbnail, model.info_json, other_files))
 
     @staticmethod
     def run_after(fields: dict, optional_fields: dict, cmds: List[Script]):
@@ -546,7 +590,7 @@ class PlaylistChecker:
                 if err:
                     logger.error(err)
 
-    def get_new_deleted(self, deleted: list[BaseVideo], site: int | Site) -> set[BaseVideo]:
+    def get_new_deleted(self, deleted: set[BaseVideoT], site: int | Site) -> set[BaseVideoT]:
         """
         Gets the newly deleted videos from the specified site with
         updated titles
@@ -587,7 +631,7 @@ class PlaylistChecker:
 
         return new_deleted
 
-    def get_deleted_info(self, deleted: list[BaseVideoT], site: int | Site) -> list[BaseVideoT]:
+    def get_deleted_info(self, deleted: set[BaseVideoT], site: int | Site) -> set[BaseVideoT]:
         """
         Updates BaseVideo objects with cached info from database
         Namely updates title, channel name and channel id
@@ -672,6 +716,7 @@ class PlaylistChecker:
         playlists = self.config.playlists
         logger.info(f'Checking a total of {len(playlists)} playlists')
         checked_playlists: set[int] = set()
+        thumbnail_downloads: dict[int, set[BaseVideo]] = {site: set() for site in list(Site.__members__.values())}
 
         for idx, playlist in enumerate(playlists):
             playlist_id = playlist.playlist_id
@@ -687,7 +732,7 @@ class PlaylistChecker:
             logger.info(f'Checking playlist {playlist_id} on site {site}')
 
             # Create playlist by site
-            if site == Site.Youtube:
+            if site == Site.YouTube:
                 playlist_checker = YTPlaylist(self.conn, self.yt_api, playlist_id)
                 if not playlist_row:
                     logger.info('New playlist getting playlist info')
@@ -708,12 +753,16 @@ class PlaylistChecker:
 
             try:
                 # Items contains undeleted videos
-                items, deleted, already_checked = playlist_checker.get_videos(self.already_checked[site])
+                retval = playlist_checker.get_videos(self.already_checked[site])
+                if retval is None:
+                    continue
+
+                items, deleted, already_checked = retval
             except HttpError:
                 # Skip on playlist http error
                 continue
 
-            thumbnail.bulk_download_thumbnails(items, site)
+            thumbnail_downloads[site.value].update(items)
 
             # Get new deleted videos
             new_deleted = self.get_new_deleted(deleted, site)
@@ -816,6 +865,7 @@ class PlaylistChecker:
         logger.info('Downloading videos')
 
         downloads = 0
+        delete_files = []
         for row in self.iter_videos_to_download(playlist_ids=list(checked_playlists)):
             if 0 <= self.config.max_downloads_per_run <= downloads:
                 break
@@ -831,12 +881,136 @@ class PlaylistChecker:
                                                    self.config.download_sleep_interval)
 
             if info.success:
-                self.update_vid_filename(info.filename, info.downloaded_format, row.id)
                 downloads += 1
+                old_extras = None
+                if self.config.delete_old_info or self.config.delete_old_thumbnail:
+                    old_extras = self.get_extra_files(row.id)
+
+                if not self.config.s3_archive:
+                    self.update_vid_filename(info.filename, info.downloaded_format, row.id)
+                    extra = models.VideoExtraFiles(
+                        video_id=row.id,
+                        thumbnail=info.thumbnail_path,
+                        info_json=info.info_path,
+                        other_files=generate_extra_files(subtitles=info.subtitle_paths)
+                    )
+                    self.update_extra_files(extra)
+
+                    if not old_extras:
+                        continue
+
+                    if self.config.delete_old_info and info.info_path:
+                        self.delete_old_file(old_extras.info_json,
+                                             info.info_path)
+
+                    if self.config.delete_old_thumbnail and info.thumbnail_path:
+                        self.delete_old_file(old_extras.thumbnail,
+                                             info.thumbnail_path)
+                    continue
+
+                base_tags = {
+                    # name as a string for easier readability
+                    'site': Site(row.site).name,
+                    'video_id': row.id
+                }
+
+                s3_file = self.upload_and_delete_file(info.filename, base_tags, S3ObjectType.video)
+                if s3_file:
+                    self.update_vid_filename(s3_file, info.downloaded_format, row.id)
+                else:
+                    self.update_vid_filename(info.filename, info.downloaded_format, row.id)
+
+                info_file = self.upload_and_delete_file(info.info_path, base_tags, S3ObjectType.metadata)
+                thumbnail_file = self.upload_and_delete_file(info.thumbnail_path, base_tags, S3ObjectType.thumbnail)
+
+                subs = []
+                if info.subtitle_paths:
+                    for sub in info.subtitle_paths:
+                        sub_path = self.upload_and_delete_file(sub, base_tags, S3ObjectType.subtitle)
+                        if sub_path is not None:
+                            subs.append(sub_path)
+
+                self.update_extra_files(models.VideoExtraFiles(
+                    video_id=row.id,
+                    thumbnail=thumbnail_file,
+                    info_json=info_file,
+                    other_files=generate_extra_files(subtitles=subs)
+                ))
+
+                if old_extras:
+                    # If old info json exists delete that
+                    if self.config.delete_old_info and old_extras.info_json:
+                        if info.info_path:
+                            self.delete_old_file(old_extras.info_json, info.info_path)
+
+                        # Make sure new thumbnail was uploaded and filename does not contain directories
+                        if info_file and self.should_delete_s3(old_extras.info_json, info_file):
+                            delete_files.append(old_extras.info_json)
+
+                    # If old thumbnail exists delete that
+                    if self.config.delete_old_thumbnail and old_extras.thumbnail:
+                        if info.thumbnail_path:
+                            self.delete_old_file(old_extras.thumbnail, info.thumbnail_path)
+
+                        # Make sure new thumbnail was uploaded and filename does not contain directories
+                        if thumbnail_file and self.should_delete_s3(old_extras.thumbnail, thumbnail_file):
+                            delete_files.append(old_extras.thumbnail)
+
             else:
                 downloads += 1
 
+        self.conn.commit()
         logger.info('Videos downloaded')
+
+        for site, videos in thumbnail_downloads.items():
+            if not videos:
+                continue
+
+            videos_dict: dict[str, BaseVideo] = {v.video_id: v for v in videos}
+
+            # Must be called after all playlists have been processed for proper functionality
+            partial_videos = self.get_thumbnails_to_dl(site)
+            should_download = {}
+            for vid in partial_videos:
+                if found := videos_dict.get(vid.video_id):
+                    should_download[vid.id] = found
+
+            if not should_download:
+                continue
+
+            logger.info(f'Downloading {len(should_download)} thumbnails for site {Site(site).name}')
+            thumbnail.bulk_download_thumbnails(should_download.values(), Site(site))
+
+            # Update database with new filenames and upload to S3 if required
+            for id_, vid in should_download.items():
+                thumbnail_file = vid.thumbnail_path
+                if not thumbnail_file:
+                    continue
+
+                if not self.config.s3_archive:
+                    self.update_extra_files(models.VideoExtraFiles(
+                        video_id=id_,
+                        thumbnail=thumbnail_file
+                    ))
+                    continue
+
+                base_tags = {
+                    'site': Site(site).name,
+                    'video_id': id_
+                }
+
+                new_file = self.upload_and_delete_file(thumbnail_file, base_tags, S3ObjectType.thumbnail)
+                if new_file:
+                    thumbnail_file = new_file
+
+                self.update_extra_files(models.VideoExtraFiles(
+                    video_id=id_,
+                    thumbnail=thumbnail_file
+                ))
+
+        if self.config.s3_archive:
+            from src.s3 import upload
+            upload.delete_files(delete_files, self.config.s3_bucket)
 
         if self.threads:
             logger.debug('Waiting for threads to finish')
@@ -845,5 +1019,56 @@ class PlaylistChecker:
                 thread.join(timeout=timeout)
 
             if list(filter(lambda t: t.is_alive(), self.threads)):
-                logger.warning('Threads open even after 15min. Force closing')
+                logger.error('Threads open even after 15min. Force closing')
+                self.conn.commit()
                 exit()
+
+    @staticmethod
+    def should_delete_s3(old_path: Optional[str], new_name: str) -> bool:
+        if not PlaylistChecker.should_delete(old_path, new_name):
+            return False
+
+        # Make sure old file was most likely uploaded to S3 (doesn't contain a folder in the name)
+        return get_filename(old_path) == old_path
+
+    @staticmethod
+    def should_delete(old_path: Optional[str], new_path: str) -> bool:
+        if old_path is None or old_path == new_path:
+            return False
+
+        return True
+
+    def delete_old_file(self, old_path: Optional[str], new_path: str):
+        if not self.should_delete(old_path, new_path):
+            return
+
+        if not os.path.exists(old_path):
+            return
+
+        logger.info(f'Deleting old file since a new file was downloaded. {old_path} -> {new_path}')
+        try:
+            os.remove(old_path)
+        except OSError:
+            logger.exception(f'Failed to remove file {old_path}')
+
+    def upload_and_delete_file(self, filename: Optional[str], base_tags: dict, object_type: S3ObjectType) -> Optional[str]:
+        if not filename:
+            return
+
+        from src.s3.upload import upload_file
+
+        logger.debug(f'Uploading {filename} with type {object_type}')
+        s3_filename = upload_file(filename, self.config.s3_bucket, {
+            **base_tags,
+            'type': object_type.value
+        })
+
+        if not s3_filename:
+            return
+
+        try:
+            os.remove(filename)
+        except OSError:
+            logger.exception(f'Failed to remove file {filename}')
+
+        return s3_filename

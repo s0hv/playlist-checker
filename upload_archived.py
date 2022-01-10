@@ -63,8 +63,12 @@ if __name__ == '__main__':
     logger = logging.getLogger('debug')
     logger.setLevel(logging.DEBUG)
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(
-        logging.Formatter('%(asctime)s:%(levelname)s:[%(module)s] %(message)s'))
+    handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:[%(module)s] %(message)s'))
+    logger.addHandler(handler)
+
+    logs_dir = os.getenv('LOGS_DIR', dir_path)
+    handler = logging.FileHandler(filename=os.path.join(logs_dir, 'debug.log'), encoding='utf-8', mode='a')
+    handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:[%(module)s] %(message)s'))
     logger.addHandler(handler)
 
     parser = ArgumentParser()
@@ -172,14 +176,14 @@ if __name__ == '__main__':
             base_tags = {}
             if (site := d.get('site')) is not None:
                 base_tags['site'] = site
-            if (video_id := d.get('id')) is not None:
-                base_tags['video_id'] = video_id
+            if (video_db_id := d.get('id')) is not None:
+                base_tags['video_id'] = video_db_id
 
             if video_file := d.get(S3ObjectType.video):
                 s3_file = checker.upload_and_delete_file(video_file, base_tags, S3ObjectType.video)
 
-                if s3_file and video_id:
-                    checker.update_filename(s3_file, video_id)
+                if s3_file and video_db_id:
+                    checker.update_filename(s3_file, video_db_id)
 
             info_file = checker.upload_and_delete_file(d.get(S3ObjectType.metadata), base_tags, S3ObjectType.metadata)
             thumbnail_file = checker.upload_and_delete_file(d.get(S3ObjectType.thumbnail), base_tags, S3ObjectType.thumbnail)
@@ -198,9 +202,9 @@ if __name__ == '__main__':
                     if sub_path is not None:
                         subs.append(sub_path)
 
-            if video_id:
+            if video_db_id:
                 extra_files = models.VideoExtraFiles(
-                    video_id=video_id,
+                    video_id=video_db_id,
                     thumbnail=thumbnail_file,
                     info_json=info_file,
                     audio_file=audio_file,
@@ -219,13 +223,14 @@ if __name__ == '__main__':
             cur.execute(sql)
             missing_thumbs = cur.fetchall()
 
+        updates = 0
         for site, video_id, id_ in missing_thumbs:
             thumbs_path = os.path.join(data_dir, str(site))
             thumbnail_file = os.path.join(thumbs_path, video_id + '.jpg')  # It's all jpeg
             if os.path.exists(thumbnail_file):
                 base_tags = {
                     'site': site,
-                    'video_id': video_id
+                    'video_id': id_
                 }
                 thumbnail = checker.upload_and_delete_file(thumbnail_file, base_tags, S3ObjectType.thumbnail)
 
@@ -234,4 +239,9 @@ if __name__ == '__main__':
                         video_id=id_,
                         thumbnail=thumbnail
                     ))
+
+                    updates += 1
+                    if updates % 10 == 0:
+                        conn.commit()
+
         checker._conn = None

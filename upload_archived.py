@@ -234,10 +234,4 @@ if __name__ == '__main__':
                         video_id=id_,
                         thumbnail=thumbnail
                     ))
-
-                    try:
-                        os.remove(thumbnail_file)
-                    except OSError:
-                        logger.exception(f'Failed to delete thumbnail {thumbnail_file}')
-
         checker._conn = None

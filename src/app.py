@@ -429,7 +429,7 @@ class PlaylistChecker:
         self.all_vid_ids[site].update(vid_ids.keys())
         return vid_ids
 
-    def add_playlist(self, playlist_id: str, name: str, site: int | Site) -> int:
+    def add_playlist(self, playlist_id: str, name: str, site: int | Site) -> models.Playlist:
         """
         Adds a playlist to the database if it doesn't exist
 
@@ -446,19 +446,19 @@ class PlaylistChecker:
 
         """
         site = int(site)
-        sql = 'INSERT INTO playlists (playlist_id, name, site) VALUES (%s, %s, %s) RETURNING id'
+        sql = 'INSERT INTO playlists (playlist_id, name, site) VALUES (%s, %s, %s) RETURNING *'
 
         try:
-            with self.conn.cursor() as cursor:
+            with self.class_cursor(models.Playlist) as cursor:
                 cursor.execute(sql, (playlist_id, name, int(site)))
-                playlist_id = cursor.fetchone()['id']
+                playlist = cursor.fetchone()
 
             self.conn.commit()
         except Exception:
             self.conn.rollback()
             raise
 
-        return playlist_id
+        return playlist
 
     def get_playlist_video_ids(self, playlist_id: int) -> list[models.PlaylistVideo]:
         """
@@ -747,8 +747,7 @@ class PlaylistChecker:
                     if not info:
                         continue
 
-                    playlist_row.id = self.add_playlist(playlist_id, info['snippet']['title'], site)
-                    playlist_row.name = info['snippet']['title']
+                    playlist_row = self.add_playlist(playlist_id, info['snippet']['title'], site)
             else:
                 logger.warning(f'{site} not implemented')
                 continue

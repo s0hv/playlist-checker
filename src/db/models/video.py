@@ -42,4 +42,5 @@ class VideoExtraFiles:
     video_id: int
     thumbnail: Optional[str] = None
     info_json: Optional[str] = None
+    audio_file: Optional[str] = None
     other_files: Optional[dict[str, str]] = None

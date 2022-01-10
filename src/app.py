@@ -537,18 +537,19 @@ class PlaylistChecker:
 
     def update_extra_files(self, model: models.VideoExtraFiles):
         sql = '''
-        INSERT INTO extra_video_files as e (video_id, thumbnail, info_json, other_files) 
-        VALUES (%s, %s, %s, %s)
+        INSERT INTO extra_video_files as e (video_id, thumbnail, info_json, other_files, audio_file) 
+        VALUES (%s, %s, %s, %s, %s)
         ON CONFLICT (video_id) DO UPDATE 
         SET thumbnail=COALESCE(EXCLUDED.thumbnail, e.thumbnail), 
             info_json=COALESCE(EXCLUDED.info_json, e.info_json), 
-            other_files=COALESCE(EXCLUDED.other_files, e.other_files)
+            other_files=COALESCE(EXCLUDED.other_files, e.other_files),
+            audio_file=COALESCE(EXCLUDED.audio_file, e.audio_file)
         '''
 
         with self.conn.transaction():
             with self.conn.cursor() as cur:
                 other_files = Json(model.other_files) if model.other_files else None
-                cur.execute(sql, (model.video_id, model.thumbnail, model.info_json, other_files))
+                cur.execute(sql, (model.video_id, model.thumbnail, model.info_json, other_files, model.audio_file))
 
     @staticmethod
     def run_after(fields: dict, optional_fields: dict, cmds: List[Script]):

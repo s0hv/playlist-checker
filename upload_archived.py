@@ -41,17 +41,20 @@ def get_s3_type(path: str) -> S3ObjectType:
 
     mimetype, _ = guess_type(path, strict=False)
 
-    if 'image' in mimetype:
+    if 'image/' in mimetype:
         return S3ObjectType.thumbnail
 
-    if 'video' in mimetype:
+    if 'video/' in mimetype:
         return S3ObjectType.video
 
-    if 'json' in mimetype:
+    if '/json' in mimetype:
         if filepath.endswith('info'):
             return S3ObjectType.metadata
         if filepath.endswith('live_chat'):
             return S3ObjectType.subtitle
+
+    if 'audio/' in mimetype:
+        return S3ObjectType.audio
 
     return S3ObjectType.other
 
@@ -96,8 +99,11 @@ if __name__ == '__main__':
             strict = False
             key = s3_type
             match s3_type:
-                case S3ObjectType.video | S3ObjectType.thumbnail | S3ObjectType.metadata:
+                case S3ObjectType.video | S3ObjectType.thumbnail | S3ObjectType.metadata | S3ObjectType.audio:
                     strict = True
+
+            if s3_type == S3ObjectType.other:
+                print(f'File {file} classified as S3ObjectType.other')
 
             if strict and key in data:
                 raise ValueError(f'Multiple files of same type for file {file}.\n{data}')
@@ -111,6 +117,7 @@ if __name__ == '__main__':
                 else:
                     data[key] = [file_path]
 
+    print('')
     print('File type statistics')
     for name, count in counter.most_common():
         print(f'{name}: {count}')
@@ -132,6 +139,10 @@ if __name__ == '__main__':
     not_found = {}
 
     for k, v in list(video_files.items()):
+        # If only audio file found use that as the video as well
+        if S3ObjectType.video not in v and S3ObjectType.audio in v:
+            v[S3ObjectType.video] = v[S3ObjectType.audio]
+
         if S3ObjectType.video not in v:
             not_found[k] = v
             if not args.upload_all:
@@ -172,6 +183,7 @@ if __name__ == '__main__':
 
             info_file = checker.upload_and_delete_file(d.get(S3ObjectType.metadata), base_tags, S3ObjectType.metadata)
             thumbnail_file = checker.upload_and_delete_file(d.get(S3ObjectType.thumbnail), base_tags, S3ObjectType.thumbnail)
+            audio_file = checker.upload_and_delete_file(d.get(S3ObjectType.audio), base_tags, S3ObjectType.audio)
 
             subs = []
             if subtitle_paths := d.get(S3ObjectType.subtitle):
@@ -185,6 +197,7 @@ if __name__ == '__main__':
                     video_id=video_id,
                     thumbnail=thumbnail_file,
                     info_json=info_file,
+                    audio_file=audio_file,
                     other_files=generate_extra_files(subtitles=subs)
                 )
                 logger.info(f'Updating extra files with object {extra_files}')

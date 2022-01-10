@@ -16,4 +16,5 @@ class S3ObjectType(Enum):
     thumbnail = 'thumbnail'
     subtitle = 'subtitle'
     metadata = 'metadata'
+    audio = 'audio'
     other = 'other'

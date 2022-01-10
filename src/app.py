@@ -966,7 +966,7 @@ class PlaylistChecker:
             else:
                 downloads += 1
                 if info.blocked:
-                    self.update_vid_filename(None, None if row.downloaded_format else 'Video Blocked', row.id)
+                    self.update_vid_filename(None, None if row.downloaded_format else 'Video Unavailable', row.id)
 
         self.conn.commit()
         logger.info('Videos downloaded')

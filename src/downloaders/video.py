@@ -257,7 +257,7 @@ def download_video(video, row: models.Video, opts, sleep: MinMax = SLEEP) -> Dow
     except yt_dlp.DownloadError as e:
         time.sleep(uniform(sleep.min, sleep.max))
 
-        blocked = re.search(r'blocked in your|copyright grounds', e.msg, re.I) is not None
+        blocked = re.search(r'blocked in your|copyright grounds|video unavailable', e.msg, re.I) is not None
         if blocked:
             logger.warning(f'Video was blocked  in your country. {e.msg}')
         else:

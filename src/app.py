@@ -451,7 +451,7 @@ class PlaylistChecker:
         try:
             with self.conn.cursor() as cursor:
                 cursor.execute(sql, (playlist_id, name, int(site)))
-                playlist_id = cursor.fetchone()[0]
+                playlist_id = cursor.fetchone()['playlist_id']
 
             self.conn.commit()
         except Exception:

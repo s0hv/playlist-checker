@@ -12,7 +12,6 @@ import psycopg
 
 from src.db import models
 from src.db.dbutils import DbUtils
-from src.utils import generate_extra_files
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 os.chdir(dir_path)
@@ -206,7 +205,7 @@ if __name__ == '__main__':
                     thumbnail=thumbnail_file,
                     info_json=info_file,
                     audio_file=audio_file,
-                    other_files=generate_extra_files(subtitles=subs)
+                    subtitles=subs
                 )
                 logger.info(f'Updating extra files with object {extra_files}')
                 db.update_extra_files(extra_files)

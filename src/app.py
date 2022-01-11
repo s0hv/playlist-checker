@@ -17,7 +17,7 @@ from src.db.dbutils import DbUtils
 from src.downloaders import thumbnail, video as video_downloader
 from src.enum import Site, S3ObjectType
 from src.playlist import YTPlaylist
-from src.utils import generate_extra_files, get_filename
+from src.utils import get_filename
 from src.video import SITE_CLASSES, BaseVideo
 
 logger = logging.getLogger('debug')
@@ -126,7 +126,7 @@ class PlaylistChecker:
                         video_id=row.id,
                         thumbnail=info.thumbnail_path,
                         info_json=info.info_path,
-                        other_files=generate_extra_files(subtitles=info.subtitle_paths)
+                        subtitles=info.subtitle_paths
                     )
                     self.db.update_extra_files(extra)
 
@@ -168,7 +168,7 @@ class PlaylistChecker:
                     video_id=row.id,
                     thumbnail=thumbnail_file,
                     info_json=info_file,
-                    other_files=generate_extra_files(subtitles=subs)
+                    subtitles=subs or None
                 ))
 
                 if old_extras:

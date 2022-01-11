@@ -1,8 +1,8 @@
 import logging
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Callable, Concatenate, TypeVar, ParamSpec, Iterable, Type, \
-    cast, Sequence, Optional, Generator
+from typing import (Callable, Concatenate, TypeVar, ParamSpec, Iterable, Type,
+                    cast, Sequence, Optional, Generator)
 
 from psycopg import Cursor, Connection
 from psycopg.rows import class_row, BaseRowFactory
@@ -499,16 +499,17 @@ class DbUtils(WithConnection):
     @transaction()
     def update_extra_files(self, model: models.VideoExtraFiles, cur: Cursor = NotImplemented):
         sql = '''
-        INSERT INTO extra_video_files as e (video_id, thumbnail, info_json, other_files, audio_file) 
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO extra_video_files as e (video_id, thumbnail, info_json, other_files, audio_file, subtitles) 
+        VALUES (%s, %s, %s, %s, %s, %s)
         ON CONFLICT (video_id) DO UPDATE 
         SET thumbnail=COALESCE(EXCLUDED.thumbnail, e.thumbnail), 
             info_json=COALESCE(EXCLUDED.info_json, e.info_json), 
             other_files=COALESCE(EXCLUDED.other_files, e.other_files),
-            audio_file=COALESCE(EXCLUDED.audio_file, e.audio_file)
+            audio_file=COALESCE(EXCLUDED.audio_file, e.audio_file),
+            subtitles=COALESCE(EXCLUDED.subtitles, e.subtitles)
         '''
         other_files = Json(model.other_files) if model.other_files else None
-        cur.execute(sql, (model.video_id, model.thumbnail, model.info_json, other_files, model.audio_file))
+        cur.execute(sql, (model.video_id, model.thumbnail, model.info_json, other_files, model.audio_file, model.subtitles or None))
 
     @transaction()
     def get_deleted_info(self, deleted: set[BaseVideoT], site: int | Site, cur: Cursor = NotImplemented) -> set[BaseVideoT]:

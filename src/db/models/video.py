@@ -43,4 +43,5 @@ class VideoExtraFiles:
     thumbnail: Optional[str] = None
     info_json: Optional[str] = None
     audio_file: Optional[str] = None
+    subtitles: Optional[list[str]] = None
     other_files: Optional[dict[str, str]] = None

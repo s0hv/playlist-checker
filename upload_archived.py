@@ -11,6 +11,7 @@ import dotenv
 import psycopg
 
 from src.db import models
+from src.db.dbutils import DbUtils
 from src.utils import generate_extra_files
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -126,19 +127,13 @@ if __name__ == '__main__':
     for name, count in counter.most_common():
         print(f'{name}: {count}')
 
-    from src.app import PlaylistChecker
-
-    checker = PlaylistChecker(config=config)
     sql = '''
     SELECT id, downloaded_filename, site, video_id FROM videos WHERE downloaded_filename IS NOT NULL
     '''
     with psycopg.connect(config.db_conn_string) as conn:
-        checker._conn = conn
-        with checker.conn.cursor() as cur:
+        with conn.cursor() as cur:
             cur.execute(sql)
             filename2id = {os.path.split(f)[1]: (v_id, site, video_id) for v_id, f, site, video_id in cur}
-
-        checker._conn = None
 
     not_found = {}
 
@@ -169,8 +164,11 @@ if __name__ == '__main__':
     if args.dry_run:
         exit()
 
+    from src.app import PlaylistChecker
+
     with psycopg.connect(config.db_conn_string) as conn:
-        checker._conn = conn
+        db = DbUtils(conn)
+        checker = PlaylistChecker(config=config)
 
         for d in video_files.values():
             base_tags = {}
@@ -183,7 +181,7 @@ if __name__ == '__main__':
                 s3_file = checker.upload_and_delete_file(video_file, base_tags, S3ObjectType.video)
 
                 if s3_file and video_db_id:
-                    checker.update_filename(s3_file, video_db_id)
+                    db.update_filename(s3_file, video_db_id)
 
             info_file = checker.upload_and_delete_file(d.get(S3ObjectType.metadata), base_tags, S3ObjectType.metadata)
             thumbnail_file = checker.upload_and_delete_file(d.get(S3ObjectType.thumbnail), base_tags, S3ObjectType.thumbnail)
@@ -211,7 +209,7 @@ if __name__ == '__main__':
                     other_files=generate_extra_files(subtitles=subs)
                 )
                 logger.info(f'Updating extra files with object {extra_files}')
-                checker.update_extra_files(extra_files)
+                db.update_extra_files(extra_files)
 
         sql = '''
         SELECT v.site, v.video_id, v.id FROM videos v
@@ -223,7 +221,6 @@ if __name__ == '__main__':
             cur.execute(sql)
             missing_thumbs = cur.fetchall()
 
-        updates = 0
         for site, video_id, id_ in missing_thumbs:
             thumbs_path = os.path.join(data_dir, str(site))
             thumbnail_file = os.path.join(thumbs_path, video_id + '.jpg')  # It's all jpeg
@@ -235,13 +232,7 @@ if __name__ == '__main__':
                 thumbnail = checker.upload_and_delete_file(thumbnail_file, base_tags, S3ObjectType.thumbnail)
 
                 if thumbnail:
-                    checker.update_extra_files(models.VideoExtraFiles(
+                    db.update_extra_files(models.VideoExtraFiles(
                         video_id=id_,
                         thumbnail=thumbnail
                     ))
-
-                    updates += 1
-                    if updates % 10 == 0:
-                        conn.commit()
-
-        checker._conn = None

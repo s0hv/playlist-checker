@@ -3,7 +3,7 @@ from typing import Optional
 
 from src.api import YTApi, Part
 from src.channel import YTChannel
-from src.video import YTVideo
+from src.video import YTVideo, BaseVideo
 
 
 class BasePlaylist(ABC):
@@ -77,7 +77,7 @@ class YTPlaylist(BasePlaylist):
     def get_playlist_info(self):
         return self.api.playlist_info(self.playlist_id, Part.Snippet)
 
-    def get_videos(self, already_checked: dict) -> Optional[tuple[set[YTVideo], set[YTVideo], set[YTVideo]]]:
+    def get_videos(self, already_checked: set[BaseVideo]) -> Optional[tuple[set[YTVideo], set[YTVideo], set[YTVideo]]]:
         """
         Finds new unchecked, deleted and already checked videos in the playlist.
         Checks deleted videos by getting all items in the playlist first (this will return all video ids even of the deleted videos)

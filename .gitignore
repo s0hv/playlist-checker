@@ -122,3 +122,7 @@ logs/
 
 # AWS
 .aws
+
+# node
+node_modules/
+web/config.js

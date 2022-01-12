@@ -162,7 +162,8 @@ class SaveFilenamesPP(yt_dlp.postprocessor.PostProcessor):
 
 
 BASE_OPTS = {
-    'outtmpl': '%(title).300s [%(id)s].%(ext)s',
+    # Max title length 200 bytes
+    'outtmpl': '%(title).200B [%(id)s].%(ext)s',
     'format': 'bv*+ba/b',
     'writeinfojson': True,
     'writesubtitles': True,

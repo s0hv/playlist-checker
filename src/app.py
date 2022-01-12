@@ -142,11 +142,7 @@ class PlaylistChecker:
                                              info.thumbnail_path)
                     continue
 
-                base_tags = {
-                    # name as a string for easier readability
-                    'site': Site(row.site).name,
-                    'video_id': row.id
-                }
+                base_tags = {}
 
                 s3_file = self.upload_and_delete_file(info.filename, base_tags, S3ObjectType.video)
                 if s3_file:
@@ -230,10 +226,7 @@ class PlaylistChecker:
                     ))
                     continue
 
-                base_tags = {
-                    'site': Site(site).name,
-                    'video_id': id_
-                }
+                base_tags = {}
 
                 new_file = self.upload_and_delete_file(thumbnail_file, base_tags, S3ObjectType.thumbnail)
                 if new_file:

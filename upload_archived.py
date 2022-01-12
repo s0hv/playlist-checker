@@ -171,10 +171,8 @@ if __name__ == '__main__':
 
         for d in video_files.values():
             base_tags = {}
-            if (site := d.get('site')) is not None:
-                base_tags['site'] = site
-            if (video_db_id := d.get('id')) is not None:
-                base_tags['video_id'] = video_db_id
+            site = d.get('site')
+            video_db_id = d.get('id')
 
             if video_file := d.get(S3ObjectType.video):
                 s3_file = checker.upload_and_delete_file(video_file, base_tags, S3ObjectType.video)
@@ -224,10 +222,7 @@ if __name__ == '__main__':
             thumbs_path = os.path.join(data_dir, str(site))
             thumbnail_file = os.path.join(thumbs_path, video_id + '.jpg')  # It's all jpeg
             if os.path.exists(thumbnail_file):
-                base_tags = {
-                    'site': site,
-                    'video_id': id_
-                }
+                base_tags = {}
                 thumbnail = checker.upload_and_delete_file(thumbnail_file, base_tags, S3ObjectType.thumbnail)
 
                 if thumbnail:

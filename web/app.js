@@ -19,6 +19,7 @@ app.use(expressWinston.logger({
 
 app.use(rateLimiter);
 app.use('/', indexRouter);
+app.use('*', (req, res) => res.status(404).end())
 
 app.use(expressWinston.errorLogger({
   transports: getTransports(),

@@ -10,11 +10,12 @@ import { getTransports } from './utils/logging.js';
 
 const app = express();
 
+const loggerFormat = process.env.EXPRESS_LOG_FORMAT || "{{res.statusCode}} {{req.method}} {{res.responseTime}}ms {{req.ip}} {{req.url}}"
 app.use(expressWinston.logger({
   transports: getTransports(),
   colorize: true,
-  msg: "{{res.statusCode}} {{req.method}} {{res.responseTime}}ms {{req.ip}} {{req.url}}",
-  meta: false
+  msg: loggerFormat,
+  meta: true
 }));
 
 app.use(rateLimiter);
@@ -23,7 +24,7 @@ app.use('*', (req, res) => res.status(404).end())
 
 app.use(expressWinston.errorLogger({
   transports: getTransports(),
-  msg: "{{res.statusCode}} {{req.method}} {{res.responseTime}}ms {{req.ip}} {{req.url}}",
+  msg: loggerFormat,
 }))
 
 const server = http.createServer(app);

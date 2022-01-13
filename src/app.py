@@ -79,7 +79,7 @@ class PlaylistChecker:
                     data[required_field.value] = optional_fields[required_field.value]
 
             try:
-                p = subprocess.Popen(shlex.split(cmd), stdin=subprocess.PIPE)
+                p = subprocess.Popen(shlex.split(cmd), stdin=subprocess.PIPE, stderr=subprocess.PIPE)
             except FileNotFoundError:
                 logger.exception('File "%s" not found' % cmd)
                 continue
@@ -90,12 +90,12 @@ class PlaylistChecker:
             try:
                 out, err = p.communicate()
             except:
-                logger.exception('Failed to run script %s' % after)
+                logger.exception(f'Failed to run script {after.name}')
             else:
                 if out:
-                    logger.info(out)
+                    logger.info(f'Script output. {out.decode("utf-8")}')
                 if err:
-                    logger.error(err)
+                    logger.error(f'Failed to run script {after.name}. {err.decode("utf-8")}')
 
     def download_videos(self, checked_playlists: list[int]) -> list[str]:
         downloads = 0

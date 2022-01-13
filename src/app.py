@@ -17,7 +17,7 @@ from src.db.dbutils import DbUtils
 from src.downloaders import thumbnail, video as video_downloader
 from src.enum import Site, S3ObjectType
 from src.playlist import YTPlaylist
-from src.utils import get_filename
+from src.utils import get_filename, json_serializer
 from src.video import SITE_CLASSES, BaseVideo
 
 logger = logging.getLogger('debug')
@@ -85,7 +85,7 @@ class PlaylistChecker:
                 continue
 
             p.stdin.write(
-                json.dumps(data, ensure_ascii=False).encode('utf-8')
+                json.dumps(data, ensure_ascii=False, default=json_serializer).encode('utf-8')
             )
             try:
                 out, err = p.communicate()
@@ -237,7 +237,7 @@ class PlaylistChecker:
                     thumbnail=thumbnail_file
                 ))
 
-    def check_all(self, whitelist: list[str] = None):
+    def check_all(self, whitelist: list[str] = None, no_download: bool = False):
         """
         Main function of this class that runs the whole thing and
         does all the stuff to make everything work as intended
@@ -396,7 +396,8 @@ class PlaylistChecker:
                                v in old}
 
                 # Get info of rest of the deleted vids
-                deleted = self.db.get_deleted_info(deleted, site)
+                deleted_to_script: list[models.VideoToScript] = self.db.get_deleted_info(deleted, site)
+                new_deleted_to_script: list[models.VideoToScript] = self.db.get_deleted_info(new_deleted, site)
 
                 logger.info(f'{len(new_deleted)} newly deleted videos')
                 logger.info(f'{len(new)} new videos')
@@ -406,12 +407,13 @@ class PlaylistChecker:
                     'channel_format': playlist_checker.channel_url_format,
                     'playlist_format': playlist_checker.playlist_url_format,
                     'playlist_id': playlist_id,
-                    'playlist_name': playlist_row.name or playlist.name
+                    'playlist_name': playlist_row.name or playlist.name,
+                    'filename_template': self.config.filename_template
                 }
                 optional_fields = {
-                    'deleted': [vid.to_dict() for vid in deleted],
-                    'new_deleted': [vid.to_dict() for vid in new_deleted],
-                    'new': [vid.to_dict() for vid in new]
+                    'deleted': [vid.__dict__ for vid in deleted_to_script],
+                    'new_deleted': [vid.__dict__ for vid in new_deleted_to_script],
+                    'new': [vid.__dict__ for vid in self.db.videos_for_script(new, site)]
                 }
 
                 thread = threading.Thread(target=self.run_after, args=(fields, optional_fields, after), daemon=True)
@@ -425,16 +427,17 @@ class PlaylistChecker:
             # TODO do when it when you need it
             pass
 
-        logger.info('Downloading videos')
+        if not no_download:
+            logger.info('Downloading videos')
 
-        delete_files = self.download_videos(list(checked_playlists))
-        logger.info('Videos downloaded')
+            delete_files = self.download_videos(list(checked_playlists))
+            logger.info('Videos downloaded')
 
-        self.download_thumbnails(thumbnail_downloads)
+            self.download_thumbnails(thumbnail_downloads)
 
-        if self.config.s3_archive:
-            from src.s3 import upload
-            upload.delete_files(delete_files, self.config.s3_bucket)
+            if self.config.s3_archive:
+                from src.s3 import upload
+                upload.delete_files(delete_files, self.config.s3_bucket)
 
         if self.threads:
             logger.debug('Waiting for threads to finish')

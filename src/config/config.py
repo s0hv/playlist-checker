@@ -36,6 +36,8 @@ class Config(BaseModel):
     delete_old_info: bool = True
     delete_old_thumbnail: bool = True
 
+    filename_template: str = '%s'
+
     scripts: List[Script]
     playlists: List[Playlist]
     after: Optional[List[Script]]

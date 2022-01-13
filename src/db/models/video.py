@@ -45,3 +45,26 @@ class VideoExtraFiles:
     audio_file: Optional[str] = None
     subtitles: Optional[list[str]] = None
     other_files: Optional[dict[str, str]] = None
+
+
+@dataclass
+class VideoToScript:
+    id: str
+    title: str
+    channel_name: Optional[str]
+    channel_id: Optional[str]
+    filename: Optional[str]
+    published_at: Optional[datetime]
+    deleted_at: Optional[datetime]
+
+    @classmethod
+    def from_row(cls, row: dict):
+        return cls(
+            id=row['video_id'],
+            title=row['title'] or 'Deleted video',
+            channel_id=row['channel_id'],
+            channel_name=row['name'],
+            filename=row['downloaded_filename'],
+            deleted_at=row['deleted_at'],
+            published_at=row['published_at']
+        )

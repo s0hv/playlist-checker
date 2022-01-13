@@ -12,10 +12,14 @@ s3_bucket: ""
 delete_old_info: true
 delete_old_thumbnail: true
 
+# Filename template given to scripts
+filename_template: "path/%s"
+
 scripts:
   - &test_script
     name: "Test"
     required_fields:
+      # New videos have the filename field set to None
       - new
       - deleted
       - new_deleted

@@ -27,6 +27,7 @@ logger.addHandler(handler)
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-s', '--specific', nargs='+')
+parser.add_argument('-nd', '--no-downloads', action='store_true', default=False)
 
 if __name__ == '__main__':
     lock = os.path.join(dir_path, '.lock')
@@ -52,4 +53,4 @@ if __name__ == '__main__':
     args = sys.argv
     args = parser.parse_args(args[1:])
 
-    checker.check_all(args.specific)
+    checker.check_all(args.specific, no_download=args.no_downloads)

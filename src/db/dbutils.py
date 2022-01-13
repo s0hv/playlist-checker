@@ -1,6 +1,6 @@
 import logging
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import (Callable, Concatenate, TypeVar, ParamSpec, Iterable, Type,
                     cast, Sequence, Optional, Generator)
 
@@ -191,7 +191,7 @@ class DbUtils(WithConnection):
 
         site = int(site)
         if do_insert:
-            t = datetime.utcnow()
+            t = datetime.now(timezone.utc)
             sql = 'INSERT INTO videos (video_id, title, published_at, site, deleted, deleted_at) VALUES %s'
 
             values = tuple((vid.video_id, t, t) for vid in do_insert)
@@ -512,7 +512,40 @@ class DbUtils(WithConnection):
         cur.execute(sql, (model.video_id, model.thumbnail, model.info_json, other_files, model.audio_file, model.subtitles or None))
 
     @transaction()
-    def get_deleted_info(self, deleted: set[BaseVideoT], site: int | Site, cur: Cursor = NotImplemented) -> set[BaseVideoT]:
+    def videos_for_script(self, videos: set[BaseVideo], site: int | Site, cur: Cursor = NotImplemented) -> list[models.VideoToScript]:
+        """
+        Transforms the given set of videos into a list that can be passed to a script
+        """
+        site = int(site)
+        sql = f'''
+        SELECT v.video_id, v.title, c.name, c.channel_id, v.downloaded_filename, v.deleted_at, v.published_at
+        FROM videos v 
+        LEFT JOIN channelVideos cv ON cv.video_id=v.id 
+        LEFT JOIN channels c ON cv.channel_id = c.id
+        WHERE v.site=%s AND v.video_id=ANY(%s)
+        '''
+
+        cur.execute(sql, [site, [vid.video_id for vid in videos]])
+        retval = []
+
+        for row in cur:
+            video_id = row['video_id']
+            video = None
+            for vid in videos:
+                if vid.video_id == video_id:
+                    video = vid
+                    break
+
+            if not video:
+                logger.warning('Video not found from database when it should be added')
+                continue
+
+            retval.append(models.VideoToScript.from_row(row))
+
+        return retval
+
+    @transaction()
+    def get_deleted_info(self, deleted: set[BaseVideo], site: int | Site, cur: Cursor = NotImplemented) -> list[models.VideoToScript]:
         """
         Updates BaseVideo objects with cached info from database
         Namely updates title, channel name and channel id
@@ -525,18 +558,25 @@ class DbUtils(WithConnection):
             cur: optional cursor
 
         Returns:
-            list: Exactly the same list as it was given
+            list of videos that can be passed to a script
 
         """
         if not deleted:
-            return deleted
+            return []
+
+        deleted = deleted.copy()
 
         site = int(site)
-        sql = 'SELECT v.video_id, v.title, c.name, c.channel_id FROM videos v INNER JOIN channelVideos cv ' \
-              'ON cv.video_id=v.id INNER JOIN channels c ON cv.channel_id = c.id ' \
-             f'WHERE v.site=%s AND v.video_id=ANY(%s)'
+        sql = f'''
+        SELECT v.video_id, v.title, c.name, c.channel_id, v.downloaded_filename, v.deleted_at, v.published_at
+        FROM videos v 
+        LEFT JOIN channelVideos cv ON cv.video_id=v.id 
+        LEFT JOIN channels c ON cv.channel_id = c.id
+        WHERE v.site=%s AND v.video_id=ANY(%s)
+        '''
 
         cur.execute(sql, [site, [vid.video_id for vid in deleted]])
+        retval = []
 
         for row in cur:
             video_id = row['video_id']
@@ -549,11 +589,21 @@ class DbUtils(WithConnection):
             if not video:
                 continue
 
-            video.title = row['title']
-            video.channel_name = row['name']
-            video.channel_id = row['channel_id']
+            deleted.remove(video)
+            retval.append(models.VideoToScript.from_row(row))
 
-        return deleted
+        for vid in deleted:
+            retval.append(models.VideoToScript(
+                id=vid.video_id,
+                title=vid.title or 'Deleted video',
+                channel_id=vid.channel_id,
+                channel_name=vid.channel_name,
+                filename=None,
+                deleted_at=datetime.now(timezone.utc),
+                published_at=None
+            ))
+
+        return retval
 
     @transaction(row_factory=class_row(models.Video))
     def get_new_deleted(self, deleted: set[BaseVideoT], site: int | Site,

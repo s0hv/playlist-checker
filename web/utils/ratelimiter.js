@@ -3,6 +3,7 @@ import Redis from 'ioredis';
 import config from './config.js';
 import { Transform } from 'stream';
 import { day, gigabyte, minute } from './units.js';
+import { logger } from './logging.js';
 
 const isDev = process.env.NODE_ENV !== 'production';
 
@@ -17,7 +18,7 @@ const redis = new Redis(process.env.REDIS_URL, {
 });
 
 redis.on('error', err => {
-  console.error('Redis error', err);
+  logger.error('Redis error', err);
 });
 
 // In case redis breaks allow some request to go through

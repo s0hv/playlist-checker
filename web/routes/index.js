@@ -8,6 +8,7 @@ import { s3Client } from '../S3/client.js';
 import config from '../utils/config.js';
 import { ThrottleDownloads } from '../utils/ratelimiter.js';
 import { day, hour } from '../utils/units.js';
+import { logger } from '../utils/logging.js';
 
 const router = express.Router();
 const cache = new NodeCache({
@@ -74,8 +75,8 @@ router.get('/:filename', (req, res, next) => {
         return res.sendStatus(404);
       }
 
-      console.error(err);
-      res.status(500).send('Error');
+      logger.error('Error while serving file', err);
+      res.sendStatus(500);
     })
 });
 

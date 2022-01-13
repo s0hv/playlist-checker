@@ -13,7 +13,7 @@ const app = express();
 app.use(expressWinston.logger({
   transports: getTransports(),
   colorize: true,
-  msg: "{{res.statusCode}} {{req.method}} {{res.responseTime}}ms {{req.url}}",
+  msg: "{{res.statusCode}} {{req.method}} {{res.responseTime}}ms {{req.ip}} {{req.url}}",
   meta: false
 }));
 
@@ -23,7 +23,7 @@ app.use('*', (req, res) => res.status(404).end())
 
 app.use(expressWinston.errorLogger({
   transports: getTransports(),
-  msg: "{{res.statusCode}} {{req.method}} {{res.responseTime}}ms {{req.url}}",
+  msg: "{{res.statusCode}} {{req.method}} {{res.responseTime}}ms {{req.ip}} {{req.url}}",
 }))
 
 const server = http.createServer(app);

@@ -10,7 +10,13 @@ import { getTransports } from './utils/logging.js';
 
 const app = express();
 
-const loggerFormat = process.env.EXPRESS_LOG_FORMAT || "{{res.statusCode}} {{req.method}} {{res.responseTime}}ms {{req.ip}} {{req.url}}"
+if (/y|yes|true|1/i.test(process.env.PROXIED)) {
+  app.set('trust proxy', 'loopback');
+}
+
+app.disable('x-powered-by');
+
+const loggerFormat = process.env.EXPRESS_LOG_FORMAT || "{{res.statusCode}} {{req.method}} {{res.responseTime}}ms {{req.ip}} {{req.url}}";
 app.use(expressWinston.logger({
   transports: getTransports(),
   colorize: true,

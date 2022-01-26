@@ -46,7 +46,7 @@ router.get('/:filename', (req, res, next) => {
     })
   )
     .then(data => {
-      const contentType = mime.lookup(ext) || config.mimetypes[ext] || 'application/octet-stream';
+      const contentType = config.mimetypes[ext] || mime.lookup(ext) || 'application/octet-stream';
 
       res.setHeader('Content-Type', contentType)
         .setHeader('Content-Length', data.ContentLength)

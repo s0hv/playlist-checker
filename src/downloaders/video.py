@@ -249,7 +249,7 @@ def download_video(video, row: models.Video, opts, sleep: MinMax = SLEEP) -> Dow
 
             info = ytdl.sanitize_info(ytdl.extract_info(video.link))
             new_file = ytdl.prepare_filename(info)
-            downloaded_format = opts.get('format', BASE_OPTS.get('format', 'default'))
+            downloaded_format = info.get('format', opts.get('format', BASE_OPTS.get('format', 'default')))
 
             dl_info.filename = new_file
             dl_info.success = True

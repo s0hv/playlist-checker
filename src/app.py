@@ -4,6 +4,7 @@ import os
 import shlex
 import subprocess
 import threading
+import time
 from typing import List, TypeVar, Optional, cast
 
 import psycopg
@@ -41,7 +42,7 @@ class PlaylistChecker:
 
         self._yt_api = YTApi(self.config.yt_token)
         self.all_tags: dict[str, int] = {}
-        self.threads = []
+        self.threads: list[threading.Thread] = []
 
         self._conn = psycopg.connect(self.config.db_conn_string, row_factory=dict_row)
         self.db = DbUtils(self._conn)
@@ -441,12 +442,22 @@ class PlaylistChecker:
 
         if self.threads:
             logger.debug('Waiting for threads to finish')
-            timeout = 900/len(self.threads)
-            for thread in self.threads:
-                thread.join(timeout=timeout)
+            timeout = 900
+            current_time = time.perf_counter()
 
-            if list(filter(lambda t: t.is_alive(), self.threads)):
-                logger.error('Threads open even after 15min. Force closing')
+            while (time.perf_counter() - current_time) < timeout:
+                for thread in self.threads:
+                    if not thread.is_alive():
+                        thread.join(timeout=1)
+
+                # Check if all threads finished
+                if all(not t.is_alive() for t in self.threads):
+                    break
+
+                time.sleep(5)
+
+            if threads := list(filter(lambda t: t.is_alive(), self.threads)):
+                logger.error(f'{len(threads)} threads open even after 15min. Force closing {threads}')
                 self.conn.commit()
                 exit()
 

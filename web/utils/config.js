@@ -10,7 +10,7 @@ import defaultConfig from '../config.default.js';
 let config = defaultConfig;
 
 try {
-  const customConfig = require('config.js');
+  const customConfig = (await import('../config.js')).default;
   config = {
     ...config,
     ...customConfig

@@ -19,11 +19,15 @@ const cache = new NodeCache({
 const bucket = process.env.BUCKET;
 
 router.get('/:filename', (req, res, next) => {
-  const cachedResponse = cache.get(req.params.filename);
+  const filename = config.mkvExtensionWorkaround ?
+    req.params.filename.replace(/.mkv.(mp4|webm)$/, '.mkv') :
+    req.params.filename;
+
+  const cachedResponse = cache.get(filename);
   if (cachedResponse) {
     return res.sendStatus(404);
   }
-  const ext = getFileExtension(req.params.filename);
+  const ext = getFileExtension(filename);
   if (!ext || !config.allowedExtensions.has(ext)) {
     return next();
   }
@@ -41,7 +45,7 @@ router.get('/:filename', (req, res, next) => {
   s3Client.send(
     new GetObjectCommand({
       Bucket: bucket,
-      Key: req.params.filename,
+      Key: filename,
       Range
     })
   )
@@ -71,7 +75,7 @@ router.get('/:filename', (req, res, next) => {
     })
     .catch(err => {
       if (err?.$response?.statusCode === 404) {
-        cache.set(req.params.filename, { statusCode: 404 });
+        cache.set(filename, { statusCode: 404 });
         return res.sendStatus(404);
       }
 

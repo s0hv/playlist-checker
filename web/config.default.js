@@ -18,6 +18,9 @@ const config = {
 
   // Max outbound transfer per day in gigabytes
   throttleRate: 10,
+
+  // Allow fetching mkv files as .mkv.mp4
+  mkvExtensionWorkaround: true
 }
 
 export default config;

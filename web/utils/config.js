@@ -4,7 +4,8 @@ import defaultConfig from '../config.default.js';
  * @type {{
  *      allowedExtensions: Set<string>,
  *      mimetypes: {},
- *      throttleRate: Number
+ *      throttleRate: Number,
+ *      mkvExtensionWorkaround: Boolean
  *    }}
  */
 let config = defaultConfig;

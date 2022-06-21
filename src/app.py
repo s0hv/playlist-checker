@@ -148,6 +148,10 @@ class PlaylistChecker:
                 s3_file = self.upload_and_delete_file(info.filename, base_tags, S3ObjectType.video)
                 if s3_file:
                     self.db.update_vid_filename(s3_file, info.downloaded_format, row.id)
+
+                    # Delete old file if force redownload
+                    if row.force_redownload and row.downloaded_filename:
+                        delete_files.append(row.downloaded_filename)
                 else:
                     self.db.update_vid_filename(info.filename, info.downloaded_format, row.id)
 

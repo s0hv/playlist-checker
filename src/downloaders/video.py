@@ -231,6 +231,18 @@ def download_video(video, row: models.Video, opts, sleep: MinMax = SLEEP) -> Dow
     if row.force_redownload:
         opts['overwrites'] = True
 
+    # Optional remuxing. Currently mkv is pretty much the only container that
+    # works since we're embedding so much stuff into the file. Other formats,
+    # especially audio only, will most likely crash
+    if row.container_override:
+        opts['postprocessors'] = [
+            {
+                'key': 'FFmpegVideoRemuxer',
+                'preferedformat': row.container_override
+            },
+            *BASE_OPTS['postprocessors'],
+        ]
+
     # Override default format
     if row.download_format:
         opts['format'] = row.download_format

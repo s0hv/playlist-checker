@@ -470,7 +470,7 @@ class DbUtils(WithConnection):
             args = [playlist_ids]
 
         sql = f'''
-        SELECT DISTINCT ON (id) id, site, v.video_id, downloaded_format, downloaded_filename, download_format, force_redownload
+        SELECT DISTINCT ON (id) id, site, v.video_id, downloaded_format, downloaded_filename, download_format, force_redownload, container_override
         FROM videos v
         {join}
         WHERE {where}

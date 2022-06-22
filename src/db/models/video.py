@@ -31,6 +31,7 @@ class Video(PartialVideo):
     downloaded_filename: Optional[str] = None
     downloaded_format: Optional[str] = None
     force_redownload: Optional[bool] = None
+    container_override: Optional[str] = None
 
     @property
     def downloaded(self) -> bool:

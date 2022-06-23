@@ -433,7 +433,7 @@ class PlaylistChecker:
             pass
 
         if not no_download:
-            logger.info('Downloading videos')
+            logger.info(f'Downloading videos from playlists {checked_playlists}')
 
             delete_files = self.download_videos(list(checked_playlists))
             logger.info('Videos downloaded')

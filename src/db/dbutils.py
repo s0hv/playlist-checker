@@ -476,8 +476,6 @@ class DbUtils(WithConnection):
         WHERE {where}
         '''
 
-        logger.debug(sql)
-
         with self.class_cursor(models.Video) as cursor:
             cursor.execute(sql, args)
             for row in cursor:

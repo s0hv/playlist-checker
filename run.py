@@ -53,4 +53,8 @@ if __name__ == '__main__':
     args = sys.argv
     args = parser.parse_args(args[1:])
 
-    checker.check_all(args.specific, no_download=args.no_downloads)
+    try:
+        checker.check_all(args.specific, no_download=args.no_downloads)
+    except Exception:
+        logger.exception('Playlist check failed')
+        raise

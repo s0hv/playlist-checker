@@ -260,11 +260,14 @@ def download_video(video, row: models.Video, opts, sleep: MinMax = SLEEP) -> Dow
             ytdl.add_post_processor(SaveFilenamesPP(dl_info), when='after_move')
 
             info = ytdl.sanitize_info(ytdl.extract_info(video.link))
+            if row.container_override:
+                info['ext'] = row.container_override
+
             new_file = ytdl.prepare_filename(info)
             downloaded_format = info.get('format', opts.get('format', BASE_OPTS.get('format', 'default')))
 
             dl_info.filename = new_file
-            dl_info.success = True
+            dl_info.success = os.path.exists(dl_info.filename)
             dl_info.downloaded_format = downloaded_format
             dl_info.info_path = ytdl.prepare_filename(info, 'infojson')
     except yt_dlp.DownloadError as e:

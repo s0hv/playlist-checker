@@ -150,7 +150,7 @@ class PlaylistChecker:
                     self.db.update_vid_filename(s3_file, info.downloaded_format, row.id)
 
                     # Delete old file if force redownload
-                    if row.force_redownload and row.downloaded_filename:
+                    if row.force_redownload and self.should_delete_s3(row.downloaded_filename, s3_file):
                         delete_files.append(row.downloaded_filename)
                 else:
                     self.db.update_vid_filename(info.filename, info.downloaded_format, row.id)
@@ -435,8 +435,13 @@ class PlaylistChecker:
         if not no_download:
             logger.info(f'Downloading videos from playlists {checked_playlists}')
 
-            delete_files = self.download_videos(list(checked_playlists))
-            logger.info('Videos downloaded')
+            delete_files = []
+            try:
+                delete_files = self.download_videos(list(checked_playlists))
+            except:
+                logger.exception('Failed to download videos')
+            else:
+                logger.info('Videos downloaded')
 
             self.download_thumbnails(thumbnail_downloads)
 
@@ -495,6 +500,10 @@ class PlaylistChecker:
 
     def upload_and_delete_file(self, filename: Optional[str], base_tags: dict, object_type: S3ObjectType) -> Optional[str]:
         if not filename:
+            return
+
+        if not os.path.exists(filename):
+            logger.error(f'{filename} does not exist')
             return
 
         from src.s3.upload import upload_file

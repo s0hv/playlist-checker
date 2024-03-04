@@ -35,6 +35,7 @@ class Config(BaseModel):
     s3_archive: bool = False  # Must be after bucket
     delete_old_info: bool = True
     delete_old_thumbnail: bool = True
+    delete_local_files: bool = True
 
     filename_template: str = '%s'
 

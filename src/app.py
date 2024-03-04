@@ -145,9 +145,10 @@ class PlaylistChecker:
 
                 base_tags = {}
 
-                s3_file = self.upload_and_delete_file(info.filename, base_tags, S3ObjectType.video)
+                s3_file, s3_filesize = self.upload_and_delete_file(info.filename, base_tags, S3ObjectType.video)
                 if s3_file:
                     self.db.update_vid_filename(s3_file, info.downloaded_format, row.id)
+                    self.db.update_filesize(s3_filesize, row.id)
 
                     # Delete old file if force redownload
                     if row.force_redownload and self.should_delete_s3(row.downloaded_filename, s3_file):
@@ -155,13 +156,15 @@ class PlaylistChecker:
                 else:
                     self.db.update_vid_filename(info.filename, info.downloaded_format, row.id)
 
-                info_file = self.upload_and_delete_file(info.info_path, base_tags, S3ObjectType.metadata)
-                thumbnail_file = self.upload_and_delete_file(info.thumbnail_path, base_tags, S3ObjectType.thumbnail)
+                info_file, info_filesize = self.upload_and_delete_file(info.info_path, base_tags, S3ObjectType.metadata)
+                thumbnail_file, thumb_filesize = self.upload_and_delete_file(info.thumbnail_path, base_tags, S3ObjectType.thumbnail)
 
                 subs = []
+                total_filesize = info_filesize + thumb_filesize
                 if info.subtitle_paths:
                     for sub in info.subtitle_paths:
-                        sub_path = self.upload_and_delete_file(sub, base_tags, S3ObjectType.subtitle)
+                        sub_path, sub_filesize = self.upload_and_delete_file(sub, base_tags, S3ObjectType.subtitle)
+                        total_filesize += sub_filesize
                         if sub_path is not None:
                             subs.append(sub_path)
 
@@ -169,7 +172,8 @@ class PlaylistChecker:
                     video_id=row.id,
                     thumbnail=thumbnail_file,
                     info_json=info_file,
-                    subtitles=subs or None
+                    subtitles=subs or None,
+                    total_filesize=total_filesize
                 ))
 
                 if old_extras:
@@ -233,13 +237,14 @@ class PlaylistChecker:
 
                 base_tags = {}
 
-                new_file = self.upload_and_delete_file(thumbnail_file, base_tags, S3ObjectType.thumbnail)
+                new_file, filesize = self.upload_and_delete_file(thumbnail_file, base_tags, S3ObjectType.thumbnail)
                 if new_file:
                     thumbnail_file = new_file
 
                 self.db.update_extra_files(models.VideoExtraFiles(
                     video_id=id_,
-                    thumbnail=thumbnail_file
+                    thumbnail=thumbnail_file,
+                    total_filesize=filesize
                 ))
 
     def check_all(self, whitelist: list[str] = None, no_download: bool = False):
@@ -498,28 +503,31 @@ class PlaylistChecker:
         except OSError:
             logger.exception(f'Failed to remove file {old_path}')
 
-    def upload_and_delete_file(self, filename: Optional[str], base_tags: dict, object_type: S3ObjectType) -> Optional[str]:
+    def upload_and_delete_file(self, filename: Optional[str], base_tags: dict, object_type: S3ObjectType) -> tuple[str, int] | tuple[None, None]:
         if not filename:
-            return
+            return None, None
 
         if not os.path.exists(filename):
             logger.error(f'{filename} does not exist')
-            return
+            return None, None
 
         from src.s3.upload import upload_file
 
         logger.debug(f'Uploading {filename} with type {object_type}')
-        s3_filename = upload_file(filename, self.config.s3_bucket, {
+        retval = upload_file(filename, self.config.s3_bucket, {
             **base_tags,
             'type': object_type.value
         })
 
-        if not s3_filename:
-            return
+        if not retval:
+            return None, None
+
+        if not self.config.delete_local_files:
+            return retval
 
         try:
             os.remove(filename)
         except OSError:
             logger.exception(f'Failed to remove file {filename}')
 
-        return s3_filename
+        return retval

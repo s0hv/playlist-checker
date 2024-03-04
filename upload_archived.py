@@ -175,27 +175,30 @@ if __name__ == '__main__':
             video_db_id = d.get('id')
 
             if video_file := d.get(S3ObjectType.video):
-                s3_file = checker.upload_and_delete_file(video_file, base_tags, S3ObjectType.video)
+                s3_file, s3_filesize = checker.upload_and_delete_file(video_file, base_tags, S3ObjectType.video)
 
                 if s3_file and video_db_id:
                     db.update_filename(s3_file, video_db_id)
+                    db.update_filesize(s3_filesize, video_db_id)
 
-            info_file = checker.upload_and_delete_file(d.get(S3ObjectType.metadata), base_tags, S3ObjectType.metadata)
-            thumbnail_file = checker.upload_and_delete_file(d.get(S3ObjectType.thumbnail), base_tags, S3ObjectType.thumbnail)
+            info_file, info_filesize = checker.upload_and_delete_file(d.get(S3ObjectType.metadata), base_tags, S3ObjectType.metadata)
+            thumbnail_file, thumb_filesize = checker.upload_and_delete_file(d.get(S3ObjectType.thumbnail), base_tags, S3ObjectType.thumbnail)
 
             # If video and audio are the same file the file has already been deleted.
             # just use the normal uploaded filename
             if video_file and video_file == d.get(S3ObjectType.audio):
                 audio_file = video_file
             else:
-                audio_file = checker.upload_and_delete_file(d.get(S3ObjectType.audio), base_tags, S3ObjectType.audio)
+                audio_file, audio_filesize = checker.upload_and_delete_file(d.get(S3ObjectType.audio), base_tags, S3ObjectType.audio)
 
             subs = []
+            total_filesize = info_filesize + thumb_filesize + audio_filesize
             if subtitle_paths := d.get(S3ObjectType.subtitle):
                 for sub in subtitle_paths:
-                    sub_path = checker.upload_and_delete_file(sub, base_tags, S3ObjectType.subtitle)
+                    sub_path, sub_filesize = checker.upload_and_delete_file(sub, base_tags, S3ObjectType.subtitle)
                     if sub_path is not None:
                         subs.append(sub_path)
+                        total_filesize += sub_filesize
 
             if video_db_id:
                 extra_files = models.VideoExtraFiles(
@@ -203,7 +206,8 @@ if __name__ == '__main__':
                     thumbnail=thumbnail_file,
                     info_json=info_file,
                     audio_file=audio_file,
-                    subtitles=subs
+                    subtitles=subs,
+                    total_filesize=total_filesize
                 )
                 logger.info(f'Updating extra files with object {extra_files}')
                 db.update_extra_files(extra_files)
@@ -223,10 +227,11 @@ if __name__ == '__main__':
             thumbnail_file = os.path.join(thumbs_path, video_id + '.jpg')  # It's all jpeg
             if os.path.exists(thumbnail_file):
                 base_tags = {}
-                thumbnail = checker.upload_and_delete_file(thumbnail_file, base_tags, S3ObjectType.thumbnail)
+                thumbnail, filesize = checker.upload_and_delete_file(thumbnail_file, base_tags, S3ObjectType.thumbnail)
 
                 if thumbnail:
                     db.update_extra_files(models.VideoExtraFiles(
                         video_id=id_,
-                        thumbnail=thumbnail
+                        thumbnail=thumbnail,
+                        total_filesize=filesize,
                     ))

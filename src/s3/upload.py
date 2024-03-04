@@ -31,7 +31,7 @@ def delete_files(keys: list[str], bucket: str):
         logger.error(f'S3 delete objects returned errors. {errors}')
 
 
-def upload_file(file_path: str, bucket: str, tags: dict[str, Any], object_name: str = None) -> Optional[str]:
+def upload_file(file_path: str, bucket: str, tags: dict[str, Any], object_name: str = None) -> Optional[tuple[str, int]]:
     """
     Uploads a file to S3 storage.
     Returns object_name if given or filename of file_path when successful.
@@ -58,6 +58,10 @@ def upload_file(file_path: str, bucket: str, tags: dict[str, Any], object_name: 
             logger.error(f'File upload to S3 failed. Filename: {object_name}')
         else:
             head = S3_CLIENT.head_object(Bucket=bucket, Key=object_name)
-            success = head['ContentLength']
-            if success:
-                return object_name
+            filesize = head['ContentLength']
+            if filesize:
+                return object_name, filesize
+
+def get_file_size(bucket: str, object_name: str) -> int:
+    head = S3_CLIENT.head_object(Bucket=bucket, Key=object_name)
+    return head['ContentLength']

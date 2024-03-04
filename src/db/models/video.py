@@ -46,6 +46,7 @@ class VideoExtraFiles:
     audio_file: Optional[str] = None
     subtitles: Optional[list[str]] = None
     other_files: Optional[dict[str, str]] = None
+    total_filesize: Optional[int] = None
 
 
 @dataclass

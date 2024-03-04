@@ -497,19 +497,24 @@ class DbUtils(WithConnection):
         cur.execute('UPDATE videos SET downloaded_filename=%s WHERE id=%s', (filename, video_id))
 
     @transaction()
+    def update_filesize(self, filesize: int, video_id: int, cur: Cursor = NotImplemented):
+        cur.execute('UPDATE videos SET filesize=%s WHERE id=%s', (filesize, video_id))
+
+    @transaction()
     def update_extra_files(self, model: models.VideoExtraFiles, cur: Cursor = NotImplemented):
         sql = '''
-        INSERT INTO extra_video_files as e (video_id, thumbnail, info_json, other_files, audio_file, subtitles) 
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO extra_video_files as e (video_id, thumbnail, info_json, other_files, audio_file, subtitles, total_filesize) 
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (video_id) DO UPDATE 
         SET thumbnail=COALESCE(EXCLUDED.thumbnail, e.thumbnail), 
             info_json=COALESCE(EXCLUDED.info_json, e.info_json), 
             other_files=COALESCE(EXCLUDED.other_files, e.other_files),
             audio_file=COALESCE(EXCLUDED.audio_file, e.audio_file),
-            subtitles=COALESCE(EXCLUDED.subtitles, e.subtitles)
+            subtitles=COALESCE(EXCLUDED.subtitles, e.subtitles),
+            total_filesize=COALESCE(EXCLUDED.total_filesize, 0) + COALESCE(e.total_filesize, 0)
         '''
         other_files = Json(model.other_files) if model.other_files else None
-        cur.execute(sql, (model.video_id, model.thumbnail, model.info_json, other_files, model.audio_file, model.subtitles or None))
+        cur.execute(sql, (model.video_id, model.thumbnail, model.info_json, other_files, model.audio_file, model.subtitles or None, model.total_filesize))
 
     @transaction()
     def videos_for_script(self, videos: set[BaseVideo], site: int | Site, cur: Cursor = NotImplemented) -> list[models.VideoToScript]:

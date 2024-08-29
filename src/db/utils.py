@@ -1,3 +1,4 @@
+from math import ceil
 from typing import TypeVar, Sequence, Any, overload, Literal
 
 import psycopg
@@ -58,7 +59,7 @@ def execute_values(cur: psycopg.Cursor[T],
     if not values:
         return [] if fetch else None
 
-    batches = len(values) // page_size + 1
+    batches = ceil(len(values) / page_size)
     prepare = batches > 3
     if template is None:
         if cols_count is None:

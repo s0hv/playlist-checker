@@ -6,7 +6,7 @@ import NodeCache from 'node-cache';
 import { getFileExtension, parseRange } from '../utils/utilities.js';
 import { s3Client } from '../S3/client.js';
 import config from '../utils/config.js';
-import { ThrottleDownloads } from '../utils/ratelimiter.js';
+import { ddosLimiter, ThrottleDownloads } from '../utils/ratelimiter.js';
 import { day, hour } from '../utils/units.js';
 import { logger } from '../utils/logging.js';
 
@@ -18,7 +18,7 @@ const cache = new NodeCache({
 
 const bucket = process.env.BUCKET;
 
-router.get('/:filename', (req, res, next) => {
+router.get('/:filename', async (req, res, next) => {
   const filename = config.mkvExtensionWorkaround ?
     req.params.filename.replace(/.mkv.(mp4|webm)$/, '.mkv') :
     req.params.filename;
@@ -41,8 +41,7 @@ router.get('/:filename', (req, res, next) => {
      Range = `bytes=${match.start}-${match.end}`;
   }
 
-
-  s3Client.send(
+  await s3Client.send(
     new GetObjectCommand({
       Bucket: bucket,
       Key: filename,
@@ -76,6 +75,8 @@ router.get('/:filename', (req, res, next) => {
     .catch(err => {
       if (err?.$response?.statusCode === 404) {
         cache.set(filename, { statusCode: 404 });
+        // Each failed AWS request should consume DDoS tokens
+        void ddosLimiter.consume(req.ip, 10).catch();
         return res.sendStatus(404);
       }
 

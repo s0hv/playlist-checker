@@ -1,5 +1,7 @@
-import { createLogger, format, transports } from 'winston';
+import pino from 'pino';
 import * as path from 'path';
+
+const loggerFormat = process.env.EXPRESS_LOG_FORMAT || "{res.statusCode} {req.method} {responseTime}ms {ip} {urlDecoded} {err.stack}";
 
 const customFormat = (info) => {
   if (info instanceof Error || info.stack) {
@@ -9,38 +11,41 @@ const customFormat = (info) => {
 }
 
 export const getTransports = () => {
-  const transports_ = [];
-  const logFormat = format.combine(
-    format.errors({ stack: true }),
-    format.timestamp({
-      format: 'YYYY-MM-DD HH:mm:ss.ms'
-    }),
-    format.colorize(),
-    format.printf(customFormat)
-  );
+  /** @type {(pino.TransportPipelineOptions | pino.TransportTargetOptions)[]} */
+  const targets = [];
+
+  /** @type {pino.TransportTargetOptions} */
+  const pinoPrettyConfig = {
+    target: 'pino-pretty',
+    options: {
+      colorize: true,
+      messageFormat: loggerFormat,
+      translateTime: 'yyyy-mm-dd HH:MM:ss.l',
+      hideObject: true,
+    },
+  }
 
   if (process.env.NODE_ENV !== 'production') {
-    transports_.push(
-      new transports.Console({
-        level: 'debug',
-        format: logFormat
-      })
-    )
+    targets.push({
+      ...pinoPrettyConfig,
+      level: 'debug',
+    })
   }
 
   const filename = path.join(process.env.LOGS_DIR || '', 'server.log');
-  transports_.push(
-    new transports.File({
-      filename,
+  targets.push({
+    ...pinoPrettyConfig,
+    options: {
+      ...pinoPrettyConfig.options,
       level: 'info',
-      format: logFormat
-    })
-  )
+      destination: filename,
+    },
+  })
 
-  return transports_;
+  return pino.transport({
+    targets,
+    sync: true,
+  })
 }
 
-export const logger = createLogger({
-  transports: getTransports(),
-  handleExceptions: true
-});
+export const logger = pino(getTransports());

@@ -35,9 +35,9 @@ const redisLimiter = new RateLimiterRedis({
   keyPrefix: 'rlflx',
 });
 
-const ddosLimiter = new RateLimiterMemory({
-  // Block requests when a burst of 300 in a minute happens
-  points: 300,
+export const ddosLimiter = new RateLimiterMemory({
+  // Block requests when a burst of 100 in a minute happens
+  points: 100,
   duration: minute
 });
 
@@ -74,6 +74,6 @@ export const rateLimiter = (req, res, next) => {
     .then(() => redisLimiter.consume(key, 1))
     .then(() => next())
     .catch(() => {
-      res.status(429).send('Too Many Requests');
+      res.status(429).end();
     });
 }

@@ -1,11 +1,11 @@
 import express from 'express';
-import expressWinston from 'express-winston';
+import pinoHttp from 'pino-http';
 import http from 'http';
 
 import indexRouter from './routes/index.js';
 
-import { rateLimiter } from './utils/ratelimiter.js';
-import { getTransports } from './utils/logging.js';
+import { ddosLimiter, rateLimiter } from './utils/ratelimiter.js';
+import { logger } from './utils/logging.js';
 
 
 const app = express();
@@ -16,22 +16,33 @@ if (/y|yes|true|1/i.test(process.env.PROXIED)) {
 
 app.disable('x-powered-by');
 
-const loggerFormat = process.env.EXPRESS_LOG_FORMAT || "{{res.statusCode}} {{req.method}} {{res.responseTime}}ms {{req.ip}} {{req.url}}";
-app.use(expressWinston.logger({
-  transports: getTransports(),
-  colorize: true,
-  msg: loggerFormat,
-  meta: true
+
+app.use(pinoHttp({
+  logger,
+   customProps: function (req) {
+    return {
+      ip: req.ip,
+      urlDecoded: decodeURIComponent(req.url === '/' ? req.originalUrl : req.url)
+    }
+  }
 }));
 
 app.use(rateLimiter);
 app.use('/', indexRouter);
-app.use('*', (req, res) => res.status(404).end())
+app.use('*catchAll', async (req, res) => {
+  res.status(404).end()
+  // When bogus URLs are requested, consume many tokens from the ddos limiter
+  await ddosLimiter.consume(req.ip, 20)
+    .catch()
+})
 
-app.use(expressWinston.errorLogger({
-  transports: getTransports(),
-  msg: loggerFormat,
-}))
+// Error handler so pino can log errors
+app.use((err, req, res, next) => {
+  // set error for pino-http to log
+  res.err = err;
+  // let express default error handler handle the error (optional)
+  next();
+});
 
 const server = http.createServer(app);
 

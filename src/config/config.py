@@ -2,7 +2,8 @@ import os
 from typing import Optional, List
 
 import yaml
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, field_validator
+from pydantic_core.core_schema import ValidationInfo
 
 from src.enum.enums import ScriptDataField, Site
 
@@ -22,7 +23,7 @@ class Playlist(BaseModel):
     name: str
     playlist_id: str
     site: Site
-    after: Optional[List[Script]]
+    after: Optional[List[Script]] = None
     archive: bool = False
 
 
@@ -41,12 +42,12 @@ class Config(BaseModel):
 
     scripts: List[Script]
     playlists: List[Playlist]
-    after: Optional[List[Script]]
-    after_all: Optional[List[Script]]
+    after: Optional[List[Script]] = None
+    after_all: Optional[List[Script]] = None
 
-    @validator('s3_archive')
-    def validate_s3_bucket(cls, v, values):
-        if v and not values.get('s3_bucket', None):
+    @field_validator('s3_archive')
+    def validate_s3_bucket(cls, v: str, values: ValidationInfo):
+        if v and not values.data.get('s3_bucket', None):
             raise ValueError('S3 bucket name not specified when S3 archive is set on.')
         return v
 

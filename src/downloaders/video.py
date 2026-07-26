@@ -17,7 +17,7 @@ from src.db import models
 logger = logging.getLogger('debug')
 override_opts = get_yt_dlp_options()
 
-SLEEP = MinMax(min=3, max=6)
+SLEEP = MinMax(min=10, max=20)
 
 
 @dataclass
@@ -210,6 +210,8 @@ BASE_OPTS = {
     'fragment_retries': 10,
     'continuedl': False,
     'retries': 10,
+    'sleep_subtitles': 10,
+    'sleep_downloads': 10,
     **override_opts
 }
 

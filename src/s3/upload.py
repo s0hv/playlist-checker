@@ -1,6 +1,7 @@
 import logging
 import os
 from datetime import datetime
+from datetime import timezone
 from typing import Optional, Any
 from urllib import parse
 
@@ -39,13 +40,24 @@ def upload_file(file_path: str, bucket: str, tags: dict[str, Any], object_name: 
     if object_name is None:
         object_name = os.path.basename(file_path)
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
+
+    extra_args = {
+        'Tagging': parse.urlencode(tags)
+    }
+
+    # If file is larger than 90 kilobytes store it in Glacier Instant Retrieval.
+    # While the billed amount is 128kb at a minimum, the storage costs are
+    # over 4 times less than standard. That's why it is okay to go under this limit.
+    if os.path.getsize(file_path) / 1024 >= 90:
+        extra_args['StorageClass'] = 'GLACIER_IR'
 
     try:
-        S3_CLIENT.upload_file(file_path, bucket, object_name,
-                              ExtraArgs={
-                                  'Tagging': parse.urlencode(tags)
-                              })
+        S3_CLIENT.upload_file(
+            file_path,
+            bucket,
+            object_name,
+            ExtraArgs=extra_args)
     except (ClientError, S3UploadFailedError):
         logger.exception(f'Failed to upload file {file_path}')
         return
@@ -61,6 +73,7 @@ def upload_file(file_path: str, bucket: str, tags: dict[str, Any], object_name: 
             filesize = head['ContentLength']
             if filesize:
                 return object_name, filesize
+
 
 def get_file_size(bucket: str, object_name: str) -> int:
     head = S3_CLIENT.head_object(Bucket=bucket, Key=object_name)

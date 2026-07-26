@@ -1,0 +1,20 @@
+[project]
+name = "playlist-checker"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "boto3[crt]==1.43.56",
+    "filelock~=3.32.0",
+    "google-api-python-client==2.198.0",
+    "psycopg[c]~=3.3.3",
+    "pydantic~=2.13.4",
+    "python-dotenv~=1.2.2",
+    "pyyaml~=6.0",
+    "yt-dlp[curl-cffi,default]>=2026.7.4",
+]
+[dependency-groups]
+dev = [
+    "boto3-stubs==1.43.56"
+]

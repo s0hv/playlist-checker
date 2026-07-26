@@ -80,7 +80,11 @@ class PlaylistChecker:
                     data[required_field.value] = optional_fields[required_field.value]
 
             try:
-                p = subprocess.Popen(shlex.split(cmd), stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+                env = os.environ.copy()
+                # Remove the current virtual env from the env
+                env.pop('VIRTUAL_ENV', None)
+
+                p = subprocess.Popen(shlex.split(cmd), stdin=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
             except FileNotFoundError:
                 logger.exception('File "%s" not found' % cmd)
                 continue
